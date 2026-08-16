@@ -1,21 +1,23 @@
 import QtQuick
 import qs.Commons
+import qs.Ui
 
-Rectangle {
+BorderSurface {
   id: root
 
   property string value: "0"
   property string label: "ONLINE"
-  property color accent: "#66c0f4"
-  property color foreground: Color.foreground
+  property color accent: Color.accent
+  property color accentText: accent
+  property color foreground: Color.popups.text
+  property color secondaryForeground: Util.alpha(foreground, 0.76)
   property string fontFamily: Style.font.family
 
   implicitWidth: metricRow.implicitWidth + Style.space(16)
   implicitHeight: Style.space(28)
   radius: height / 2
-  color: Qt.rgba(accent.r, accent.g, accent.b, 0.12)
-  border.width: 1
-  border.color: Qt.rgba(accent.r, accent.g, accent.b, 0.36)
+  color: Util.alpha(accent, Style.hoverFillAlpha)
+  borderSpec: Border.controlSpec("normal", accent, accent)
 
   Row {
     id: metricRow
@@ -24,7 +26,7 @@ Rectangle {
 
     Text {
       text: root.value
-      color: root.accent
+      color: root.accentText
       font.family: root.fontFamily
       font.pixelSize: Style.font.body
       font.bold: true
@@ -33,7 +35,7 @@ Rectangle {
     Text {
       anchors.verticalCenter: parent.verticalCenter
       text: root.label
-      color: Qt.darker(root.foreground, 1.35)
+      color: root.secondaryForeground
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.bold: true

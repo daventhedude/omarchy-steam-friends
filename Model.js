@@ -155,16 +155,17 @@ function stateLabel(friend) {
   }
 }
 
-function stateColor(friend) {
-  if (friend && String(friend.gameName || "") !== "") return "#90ba3c"
+function stateColor(friend, palette) {
+  var colors = palette || {}
+  if (friend && String(friend.gameName || "") !== "") return colors.playing || "transparent"
   switch (friend ? Number(friend.state || 0) : 0) {
-    case 1: return "#66c0f4"
-    case 2: return "#f0a35e"
+    case 1: return colors.online || "transparent"
+    case 2: return colors.busy || colors.urgent || "transparent"
     case 3:
-    case 4: return "#b8c4cf"
+    case 4: return colors.away || colors.offline || "transparent"
     case 5:
-    case 6: return "#ad8cff"
-    default: return "#67707b"
+    case 6: return colors.social || colors.online || "transparent"
+    default: return colors.offline || "transparent"
   }
 }
 

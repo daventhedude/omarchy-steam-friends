@@ -11,7 +11,10 @@ A native, theme-aware Steam friends panel for the Omarchy Quattro bar. It keeps 
 - In-game, online, and all-friends filters plus instant search
 - Click a friend to open Steam chat; right-click to open their profile
 - Native keyboard flow: `j`/`k`, arrows, Enter, `/`, `r`, `s`, and Escape
-- Theme-aware Omarchy controls with a focused Steam-inspired hero
+- Runtime theme synthesis across Omarchy's dark, light, monochrome, and custom palettes
+- Contrast-safe semantic text and status colors instead of fixed Steam-blue UI colors
+- A data-driven Presence Orbit in the hero: outer arc online, inner arc in-game
+- Native Omarchy control, spacing, typography, radius, border, hover, and focus tokens
 - Stale-while-offline cache: the last good snapshot remains useful during outages
 - No API secret in `shell.json`, process arguments, QML, logs, or the repository
 - API keys travel in Steam's supported `x-webapi-key` header, never in request URLs
@@ -93,6 +96,7 @@ As with every Omarchy shell plugin, the code runs with your user permissions. Re
 omarchy plugin validate .
 ./scripts/steam-friends demo | jq .
 ./tests/security.sh
+./tests/theme-contract.mjs
 ```
 
 For a visual fixture without Steam credentials, add `"_demoMode": true` to the widget's local `shell.json` entry while developing. This setting is intentionally not exposed in the public settings form.

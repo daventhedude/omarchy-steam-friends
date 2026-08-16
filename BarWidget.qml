@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import qs.Commons
 import qs.Ui
+import "Theme.js" as Theme
 
 BarWidget {
   id: root
@@ -22,6 +23,13 @@ BarWidget {
   readonly property bool configured: panelLoader.item
     ? panelLoader.item.configured
     : false
+  readonly property color badgeColor: root.inGameCount > 0
+    ? Color.accent
+    : (root.bar ? root.bar.barForeground : Color.bar.text)
+  readonly property color badgeText: Theme.contrastText(
+    badgeColor,
+    root.bar ? root.bar.barForeground : Color.bar.text,
+    Color.bar.background)
 
   function injectPanel() {
     var target = panelLoader.item
@@ -95,17 +103,17 @@ BarWidget {
         width: Math.max(Style.space(9), badgeLabel.implicitWidth + Style.space(4))
         height: Style.space(9)
         radius: height / 2
-        color: root.inGameCount > 0 ? "#90ba3c" : "#66c0f4"
-        border.width: 1
+        color: root.badgeColor
+        border.width: Style.spacing.hairline
         border.color: Color.bar.background
 
         Text {
           id: badgeLabel
           anchors.centerIn: parent
           text: root.onlineCount > 99 ? "99+" : String(root.onlineCount)
-          color: "#07111b"
+          color: root.badgeText
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
-          font.pixelSize: Style.space(6)
+          font.pixelSize: Math.max(1, Math.round(Style.font.caption * 0.62))
           font.bold: true
         }
       }

@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Ui
 import "../Model.js" as Model
 
 Item {
@@ -7,7 +8,8 @@ Item {
 
   property string imageUrl: ""
   property string displayName: ""
-  property color statusColor: "#67707b"
+  property color statusColor: Color.muted
+  property color statusTextColor: Color.popups.text
   property real avatarSize: Style.space(44)
   property bool showStatus: true
   readonly property string safeImageUrl: Model.safeAvatarUrl(imageUrl)
@@ -15,19 +17,18 @@ Item {
   implicitWidth: avatarSize
   implicitHeight: avatarSize
 
-  Rectangle {
+  BorderSurface {
     id: frame
     anchors.fill: parent
-    radius: Style.space(8)
-    color: Qt.rgba(root.statusColor.r, root.statusColor.g, root.statusColor.b, 0.16)
-    border.width: Style.space(2)
-    border.color: root.statusColor
+    radius: Style.cornerRadius
+    color: Util.alpha(root.statusColor, Style.selectedFillAlpha)
+    borderSpec: Border.controlSpec("normal", root.statusColor, root.statusColor)
 
     Text {
       anchors.centerIn: parent
       text: Model.initials(root.displayName)
       textFormat: Text.PlainText
-      color: root.statusColor
+      color: root.statusTextColor
       font.family: Style.font.family
       font.pixelSize: Math.round(root.avatarSize * 0.3)
       font.bold: true
@@ -60,7 +61,7 @@ Item {
     height: width
     radius: width / 2
     color: root.statusColor
-    border.width: Style.space(2)
+    border.width: Math.max(Style.spacing.hairline, Style.normalBorderWidth)
     border.color: Color.popups.background
   }
 }

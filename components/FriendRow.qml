@@ -9,6 +9,18 @@ CursorSurface {
   required property var friend
   property bool selectedRow: false
   property color contentForeground: Color.foreground
+  property color secondaryForeground: Util.alpha(contentForeground, 0.72)
+  property color quietForeground: Util.alpha(contentForeground, 0.56)
+  property var presencePalette: ({
+    playing: Color.accent,
+    online: contentForeground,
+    busy: Color.urgent,
+    urgent: Color.urgent,
+    away: Color.muted,
+    social: Color.accent,
+    offline: Color.muted
+  })
+  property var presenceTextPalette: presencePalette
   property string fontFamily: Style.font.family
   property double nowMs: Date.now()
 
@@ -16,7 +28,8 @@ CursorSurface {
   signal profileRequested()
   signal hoveredRow()
 
-  readonly property color presenceColor: Model.stateColor(friend)
+  readonly property color presenceColor: Model.stateColor(friend, presencePalette)
+  readonly property color presenceTextColor: Model.stateColor(friend, presenceTextPalette)
   readonly property bool inGame: String(friend.gameName || "") !== ""
   readonly property bool offline: Number(friend.state || 0) <= 0
 
@@ -25,7 +38,21 @@ CursorSurface {
   foreground: contentForeground
   accent: presenceColor
   hasCursor: selectedRow
-  fill: Qt.rgba(presenceColor.r, presenceColor.g, presenceColor.b, inGame ? 0.14 : 0.09)
+  fill: Util.alpha(presenceColor,
+    inGame ? Style.selectedFillAlpha : Style.hoverFillAlpha)
+
+  Rectangle {
+    anchors.left: parent.left
+    anchors.verticalCenter: parent.verticalCenter
+    width: Math.max(Style.spacing.hairline, Style.space(2))
+    height: root.inGame ? parent.height * 0.58 : parent.height * 0.34
+    radius: width / 2
+    color: root.presenceColor
+    opacity: root.selectedRow ? 1 : 0.58
+
+    Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    Behavior on opacity { NumberAnimation { duration: 120 } }
+  }
 
   SteamAvatar {
     id: avatar
@@ -36,6 +63,7 @@ CursorSurface {
     imageUrl: String(root.friend.avatar || "")
     displayName: String(root.friend.name || "")
     statusColor: root.presenceColor
+    statusTextColor: root.presenceTextColor
   }
 
   Column {
@@ -52,7 +80,7 @@ CursorSurface {
       text: String(root.friend.name || "Unknown friend")
       textFormat: Text.PlainText
       color: root.offline
-        ? Qt.darker(root.contentForeground, 1.45)
+        ? root.secondaryForeground
         : root.contentForeground
       font.family: root.fontFamily
       font.pixelSize: Style.font.body
@@ -69,8 +97,8 @@ CursorSurface {
           : Model.memberSince(root.friend.friendSince))
       textFormat: Text.PlainText
       color: root.inGame
-        ? root.presenceColor
-        : Qt.darker(root.contentForeground, 1.55)
+        ? root.presenceTextColor
+        : root.secondaryForeground
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.bold: root.inGame
@@ -90,7 +118,7 @@ CursorSurface {
       anchors.right: parent.right
       text: Model.stateLabel(root.friend).toUpperCase()
       textFormat: Text.PlainText
-      color: root.presenceColor
+      color: root.presenceTextColor
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.bold: true
@@ -102,9 +130,9 @@ CursorSurface {
       anchors.right: parent.right
       text: "APP " + String(root.friend.gameId || "")
       textFormat: Text.PlainText
-      color: Qt.darker(root.contentForeground, 1.7)
+      color: root.quietForeground
       font.family: root.fontFamily
-      font.pixelSize: Style.space(8)
+      font.pixelSize: Math.max(1, Math.round(Style.font.caption * 0.8))
     }
   }
 
@@ -114,7 +142,7 @@ CursorSurface {
     anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
     text: "›"
-    color: root.selectedRow ? root.presenceColor : Qt.darker(root.contentForeground, 1.8)
+    color: root.selectedRow ? root.presenceTextColor : root.quietForeground
     font.family: root.fontFamily
     font.pixelSize: Style.font.title
   }

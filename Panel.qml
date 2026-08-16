@@ -5,6 +5,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "Theme.js" as Theme
 import "components"
 
 Panel {
@@ -15,7 +16,50 @@ Panel {
   property var anchorItem: null
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
+  readonly property color surfaceBackground: Color.popups.background
   readonly property color contentForeground: Color.popups.text
+  readonly property color accentColor: Color.accent
+  readonly property color urgentColor: Color.urgent
+  readonly property color secondaryText: Theme.readableMuted(
+    contentForeground, surfaceBackground, 4.5)
+  readonly property color quietText: Theme.readableMuted(
+    contentForeground, surfaceBackground, 3.0)
+  readonly property color accentGraphic: Theme.ensureContrast(
+    accentColor, contentForeground, surfaceBackground, 3.0)
+  readonly property color accentText: Theme.ensureContrast(
+    accentColor, contentForeground, surfaceBackground, 4.5)
+  readonly property color urgentGraphic: Theme.ensureContrast(
+    urgentColor, contentForeground, surfaceBackground, 3.0)
+  readonly property color urgentText: Theme.ensureContrast(
+    urgentColor, contentForeground, surfaceBackground, 4.5)
+  readonly property color mutedGraphic: Theme.ensureContrast(
+    Color.muted, quietText, surfaceBackground, 3.0)
+  readonly property var presencePalette: ({
+    playing: accentGraphic,
+    online: contentForeground,
+    busy: urgentGraphic,
+    urgent: urgentGraphic,
+    away: mutedGraphic,
+    social: accentGraphic,
+    offline: mutedGraphic
+  })
+  readonly property var presenceTextPalette: ({
+    playing: accentText,
+    online: contentForeground,
+    busy: urgentText,
+    urgent: urgentText,
+    away: secondaryText,
+    social: accentText,
+    offline: secondaryText
+  })
+  readonly property color heroStart: Theme.mix(
+    surfaceBackground, contentForeground, 0.04)
+  readonly property color heroMiddle: Theme.mix(
+    surfaceBackground, accentColor, 0.10)
+  readonly property color heroEnd: Theme.mix(
+    surfaceBackground,
+    inGameCount > 0 ? accentColor : contentForeground,
+    inGameCount > 0 ? 0.20 : 0.08)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string backendPath: decodeURIComponent(
     Qt.resolvedUrl("scripts/steam-friends").toString().replace(/^file:\/\//, ""))
@@ -263,25 +307,30 @@ Panel {
         anchors.fill: parent
         spacing: Style.space(14)
 
-        Rectangle {
+        BorderSurface {
           Layout.fillWidth: true
           Layout.preferredHeight: Style.space(170)
-          radius: Style.space(12)
+          radius: Style.cornerRadius
           clip: true
+          borderSpec: Border.controlSpec("normal", root.contentForeground, root.accentColor)
           gradient: Gradient {
-            GradientStop { position: 0.0; color: "#102a43" }
-            GradientStop { position: 0.58; color: "#163d59" }
-            GradientStop { position: 1.0; color: "#1b5b7d" }
+            GradientStop { position: 0.0; color: root.heroStart }
+            GradientStop { position: 0.58; color: root.heroMiddle }
+            GradientStop { position: 1.0; color: Theme.mix(root.surfaceBackground, root.accentColor, 0.18) }
           }
 
-          Rectangle {
+          PresenceOrbit {
             width: Style.space(190)
             height: width
-            radius: width / 2
             x: parent.width - width * 0.55
             y: -height * 0.55
-            color: "#146b98"
-            opacity: 0.35
+            online: 4
+            playing: 2
+            total: 8
+            foreground: root.contentForeground
+            onlineColor: root.contentForeground
+            playingColor: root.accentGraphic
+            opacity: 0.58
           }
 
           Text {
@@ -290,9 +339,9 @@ Panel {
             anchors.top: parent.top
             anchors.topMargin: Style.space(18)
             text: ""
-            color: "#66c0f4"
+            color: root.accentText
             font.family: root.fontFamily
-            font.pixelSize: Style.space(38)
+            font.pixelSize: Math.round(Style.font.displayLarge * 1.35)
           }
 
           Column {
@@ -307,7 +356,7 @@ Panel {
             Text {
               width: parent.width
               text: "YOUR SQUAD, ONE CLICK AWAY"
-              color: "#66c0f4"
+              color: root.accentText
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               font.bold: true
@@ -317,7 +366,7 @@ Panel {
             Text {
               width: parent.width
               text: "Steam Friends"
-              color: "#f2f7fb"
+              color: root.contentForeground
               font.family: root.fontFamily
               font.pixelSize: Style.font.displayLarge
               font.bold: true
@@ -326,7 +375,7 @@ Panel {
             Text {
               width: parent.width
               text: "Live presence, games, avatars and native Steam actions — directly in Omarchy."
-              color: "#b9d9ec"
+              color: root.secondaryText
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
               wrapMode: Text.WordWrap
@@ -341,7 +390,7 @@ Panel {
           Text {
             Layout.fillWidth: true
             text: "SETUP TAKES ABOUT A MINUTE"
-            color: Qt.darker(root.contentForeground, 1.35)
+            color: root.secondaryText
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             font.bold: true
@@ -360,20 +409,19 @@ Panel {
               Layout.fillWidth: true
               Layout.preferredHeight: Style.space(47)
 
-              Rectangle {
+              BorderSurface {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 width: Style.space(28)
                 height: width
                 radius: width / 2
-                color: Qt.rgba(0.4, 0.75, 0.96, 0.12)
-                border.width: 1
-                border.color: "#66c0f4"
+                color: Style.normalFillFor(root.accentGraphic, root.accentGraphic)
+                borderSpec: Border.controlSpec("normal", root.accentGraphic, root.accentGraphic)
 
                 Text {
                   anchors.centerIn: parent
                   text: String(modelData[0])
-                  color: "#66c0f4"
+                  color: root.accentText
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
                   font.bold: true
@@ -399,7 +447,7 @@ Panel {
                 Text {
                   width: parent.width
                   text: String(modelData[2])
-                  color: Qt.darker(root.contentForeground, 1.55)
+                  color: root.secondaryText
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                   elide: Text.ElideRight
@@ -416,7 +464,7 @@ Panel {
           text: root.setupStarted ? "Waiting for setup…" : "Open secure setup"
           iconText: root.setupStarted ? "󰔟" : "󰒓"
           foreground: root.contentForeground
-          accent: "#66c0f4"
+          accent: root.accentGraphic
           fontFamily: root.fontFamily
           bordered: true
           active: root.setupStarted
@@ -427,7 +475,7 @@ Panel {
         Text {
           Layout.fillWidth: true
           text: "The key never enters shell.json and is never printed to the shell log."
-          color: Qt.darker(root.contentForeground, 1.7)
+          color: root.secondaryText
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           horizontalAlignment: Text.AlignHCenter
@@ -447,21 +495,20 @@ Panel {
 
         Item { Layout.fillHeight: true }
 
-        Rectangle {
+        BorderSurface {
           Layout.alignment: Qt.AlignHCenter
           Layout.preferredWidth: Style.space(72)
           Layout.preferredHeight: Style.space(72)
           radius: width / 2
-          color: Qt.rgba(0.4, 0.75, 0.96, 0.1)
-          border.width: 1
-          border.color: "#66c0f4"
+          color: Style.normalFillFor(root.urgentGraphic, root.urgentGraphic)
+          borderSpec: Border.controlSpec("normal", root.urgentGraphic, root.urgentGraphic)
 
           Text {
             anchors.centerIn: parent
             text: ""
-            color: "#66c0f4"
+            color: root.urgentText
             font.family: root.fontFamily
-            font.pixelSize: Style.space(34)
+            font.pixelSize: Math.round(Style.font.displayLarge * 1.2)
           }
         }
 
@@ -481,7 +528,7 @@ Panel {
           Layout.alignment: Qt.AlignHCenter
           text: String(root.snapshot.error || "The Steam friends snapshot could not be loaded.")
           textFormat: Text.PlainText
-          color: Qt.darker(root.contentForeground, 1.4)
+          color: root.secondaryText
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
           horizontalAlignment: Text.AlignHCenter
@@ -496,7 +543,7 @@ Panel {
             text: "Retry"
             iconText: "󰑐"
             foreground: root.contentForeground
-            accent: "#66c0f4"
+            accent: root.accentGraphic
             fontFamily: root.fontFamily
             bordered: true
             onClicked: root.refresh()
@@ -506,7 +553,7 @@ Panel {
             text: "Reconfigure"
             iconText: "󰒓"
             foreground: root.contentForeground
-            accent: "#66c0f4"
+            accent: root.accentGraphic
             fontFamily: root.fontFamily
             bordered: true
             onClicked: root.beginSetup()
@@ -535,26 +582,31 @@ Panel {
         anchors.fill: parent
         spacing: Style.space(10)
 
-        Rectangle {
+        BorderSurface {
           id: profileHero
           Layout.fillWidth: true
           Layout.preferredHeight: Style.space(112)
-          radius: Style.space(12)
+          radius: Style.cornerRadius
           clip: true
+          borderSpec: Border.controlSpec("normal", root.contentForeground, root.accentColor)
           gradient: Gradient {
-            GradientStop { position: 0.0; color: "#0d2235" }
-            GradientStop { position: 0.55; color: "#12344d" }
-            GradientStop { position: 1.0; color: root.inGameCount > 0 ? "#294b35" : "#145172" }
+            GradientStop { position: 0.0; color: root.heroStart }
+            GradientStop { position: 0.55; color: root.heroMiddle }
+            GradientStop { position: 1.0; color: root.heroEnd }
           }
 
-          Rectangle {
+          PresenceOrbit {
             width: Style.space(190)
             height: width
-            radius: width / 2
             x: parent.width - width * 0.58
             y: -height * 0.58
-            color: root.inGameCount > 0 ? "#90ba3c" : "#66c0f4"
-            opacity: 0.12
+            online: root.onlineCount
+            playing: root.inGameCount
+            total: root.totalCount
+            foreground: root.contentForeground
+            onlineColor: root.contentForeground
+            playingColor: root.accentGraphic
+            opacity: 0.72
           }
 
           SteamAvatar {
@@ -565,7 +617,12 @@ Panel {
             avatarSize: Style.space(68)
             imageUrl: root.snapshot.self ? String(root.snapshot.self.avatar || "") : ""
             displayName: root.snapshot.self ? String(root.snapshot.self.name || "Steam") : "Steam"
-            statusColor: root.snapshot.self ? Model.stateColor(root.snapshot.self) : "#66c0f4"
+            statusColor: root.snapshot.self
+              ? Model.stateColor(root.snapshot.self, root.presencePalette)
+              : root.accentGraphic
+            statusTextColor: root.snapshot.self
+              ? Model.stateColor(root.snapshot.self, root.presenceTextPalette)
+              : root.accentText
           }
 
           Column {
@@ -580,7 +637,7 @@ Panel {
               width: parent.width
               text: root.snapshot.self ? String(root.snapshot.self.name || "Steam") : "Steam"
               textFormat: Text.PlainText
-              color: "#f4f8fb"
+              color: root.contentForeground
               font.family: root.fontFamily
               font.pixelSize: Style.font.title
               font.bold: true
@@ -592,7 +649,7 @@ Panel {
               text: root.inGameCount > 0
                 ? Model.countText(root.inGameCount, "friend is playing", "friends are playing")
                 : Model.countText(root.onlineCount, "friend online", "friends online")
-              color: root.inGameCount > 0 ? "#b7dc72" : "#8ed5f6"
+              color: root.inGameCount > 0 ? root.accentText : root.contentForeground
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
               font.bold: true
@@ -604,7 +661,7 @@ Panel {
               text: root.snapshot.stale
                 ? "Showing cached presence"
                 : "Live Steam presence"
-              color: "#8faabc"
+              color: root.secondaryText
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }
@@ -621,8 +678,8 @@ Panel {
             PanelActionButton {
               iconText: "󰑐"
               tooltipText: "Refresh · r"
-              foreground: "#dbeaf2"
-              hoverColor: "#66c0f4"
+              foreground: root.contentForeground
+              hoverColor: root.accentGraphic
               fontFamily: root.fontFamily
               enabled: !root.loading
               onClicked: root.refresh()
@@ -631,8 +688,8 @@ Panel {
             PanelActionButton {
               iconText: "󰍉"
               tooltipText: "Open Steam Friends · s"
-              foreground: "#dbeaf2"
-              hoverColor: "#66c0f4"
+              foreground: root.contentForeground
+              hoverColor: root.accentGraphic
               fontFamily: root.fontFamily
               onClicked: root.openFriends()
             }
@@ -648,8 +705,10 @@ Panel {
             MetricPill {
               value: String(root.onlineCount)
               label: "ONLINE"
-              accent: "#66c0f4"
-              foreground: "#e9f3f8"
+              accent: root.contentForeground
+              accentText: root.contentForeground
+              foreground: root.contentForeground
+              secondaryForeground: root.secondaryText
               fontFamily: root.fontFamily
             }
 
@@ -657,21 +716,22 @@ Panel {
               visible: root.inGameCount > 0
               value: String(root.inGameCount)
               label: "PLAYING"
-              accent: "#90ba3c"
-              foreground: "#e9f3f8"
+              accent: root.accentGraphic
+              accentText: root.accentText
+              foreground: root.contentForeground
+              secondaryForeground: root.secondaryText
               fontFamily: root.fontFamily
             }
           }
         }
 
-        Rectangle {
+        BorderSurface {
           visible: root.snapshot.stale || String(root.snapshot.warning || "") !== ""
           Layout.fillWidth: true
           Layout.preferredHeight: warningText.implicitHeight + Style.space(12)
-          radius: Style.space(7)
-          color: Qt.rgba(0.94, 0.64, 0.36, 0.10)
-          border.width: 1
-          border.color: Qt.rgba(0.94, 0.64, 0.36, 0.32)
+          radius: Style.cornerRadius
+          color: Style.normalFillFor(root.urgentGraphic, root.urgentGraphic)
+          borderSpec: Border.controlSpec("normal", root.urgentGraphic, root.urgentGraphic)
 
           Text {
             id: warningText
@@ -682,7 +742,7 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             text: "󰀦  " + String(root.snapshot.warning || "Steam is unreachable — cached presence is shown.")
             textFormat: Text.PlainText
-            color: "#eeb37a"
+            color: root.urgentText
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
@@ -705,7 +765,7 @@ Panel {
               Layout.fillWidth: true
               text: modelData.label + "  " + modelData.count
               foreground: root.contentForeground
-              accent: modelData.key === "game" ? "#90ba3c" : "#66c0f4"
+              accent: modelData.key === "game" ? root.accentGraphic : root.contentForeground
               fontFamily: root.fontFamily
               fontSize: Style.font.bodySmall
               horizontalPadding: Style.space(8)
@@ -722,7 +782,7 @@ Panel {
           Layout.fillWidth: true
           placeholderText: "Search friends or games…   /"
           foreground: root.contentForeground
-          accent: "#66c0f4"
+          accent: root.accentGraphic
           font.family: root.fontFamily
           horizontalPadding: Style.space(11)
           verticalPadding: Style.space(6)
@@ -765,6 +825,10 @@ Panel {
               friend: modelData
               selectedRow: index === root.selectedIndex
               contentForeground: root.contentForeground
+              secondaryForeground: root.secondaryText
+              quietForeground: root.quietText
+              presencePalette: root.presencePalette
+              presenceTextPalette: root.presenceTextPalette
               fontFamily: root.fontFamily
               nowMs: root.nowMs
               onHoveredRow: root.selectedIndex = index
@@ -787,9 +851,9 @@ Panel {
             Text {
               anchors.horizontalCenter: parent.horizontalCenter
               text: root.searchText !== "" ? "󰍉" : "󰊕"
-              color: Qt.darker(root.contentForeground, 1.65)
+              color: root.quietText
               font.family: root.fontFamily
-              font.pixelSize: Style.space(28)
+              font.pixelSize: Style.font.displayLarge
             }
 
             Text {
@@ -797,7 +861,7 @@ Panel {
               text: root.searchText !== ""
                 ? "No matching friends"
                 : (root.activeFilter === "game" ? "Nobody is playing right now" : "Nobody is online right now")
-              color: Qt.darker(root.contentForeground, 1.45)
+              color: root.secondaryText
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
             }
@@ -810,7 +874,7 @@ Panel {
             width: parent.width
             height: Style.space(2)
             radius: height / 2
-            color: "#66c0f4"
+            color: root.accentGraphic
 
             SequentialAnimation on opacity {
               running: root.loading
@@ -828,18 +892,18 @@ Panel {
           Text {
             Layout.fillWidth: true
             text: "ENTER CHAT  ·  RIGHT-CLICK PROFILE"
-            color: Qt.darker(root.contentForeground, 1.75)
+            color: root.quietText
             font.family: root.fontFamily
-            font.pixelSize: Style.space(8)
+            font.pixelSize: Style.font.caption
             font.bold: true
             font.letterSpacing: 0.7
           }
 
           Text {
             text: "R REFRESH  ·  S STEAM"
-            color: Qt.darker(root.contentForeground, 1.75)
+            color: root.quietText
             font.family: root.fontFamily
-            font.pixelSize: Style.space(8)
+            font.pixelSize: Style.font.caption
             font.bold: true
             font.letterSpacing: 0.7
           }
