@@ -41,7 +41,7 @@ After installation, click the Steam icon and select **Open secure setup**. The t
 ~/.config/omarchy/steam-friends.json   mode 0600
 ```
 
-The key is deliberately kept out of Omarchy's inline widget settings and shell logs. Existing credential files are accepted only when they are regular, user-owned, non-symlink files without group or world permissions.
+The key is deliberately kept out of Omarchy's inline widget settings and shell logs. Existing credential files are accepted only when they are single-link, regular, user-owned, non-symlink files without group or world permissions.
 
 ## Remove
 
@@ -96,6 +96,7 @@ As with every Omarchy shell plugin, the code runs with your user permissions. Re
 omarchy plugin validate .
 ./scripts/steam-friends demo | jq .
 ./tests/security.sh
+./tests/model-contract.mjs
 ./tests/theme-contract.mjs
 ```
 

@@ -16,11 +16,12 @@ The plugin has no telemetry and does not operate a third-party server.
 ## Enforced boundaries
 
 - `curl` ignores `.curlrc`, permits only HTTPS, requires TLS 1.2 or newer, does not follow redirects, and caps every response at 2 MiB.
-- API endpoints, parameters, Steam IDs, collection sizes, numeric ranges, text lengths, and CDN URLs are allowlisted before use.
+- API endpoints and their exact parameter shapes, Steam IDs, collection sizes, numeric ranges, text lengths, and CDN URLs are allowlisted before use. Each presence batch is reduced and bounded before accumulation.
 - Steam profile URLs are constructed locally from validated 17-digit Steam IDs.
 - QML performs a second validation pass and renders Steam-provided strings as plain text.
-- Credential and cache files must be regular, user-owned, non-symlink files with no group or world permissions.
+- Credential and cache files must be single-link, regular, user-owned, non-symlink files with no group or world permissions. Their direct parent directories must be real, user-owned directories; the cache directory must also have no group or world access.
 - Writes use private temporary files followed by an atomic rename. The dedicated cache directory is mode `0700`; files are mode `0600`.
+- The credential-handling helper fails closed unless it can set its process core-dump limit to zero before reading the API key.
 - Cached presence is schema-validated, stripped of unknown fields, and expires after 24 hours.
 - External programs are started with argument arrays. The plugin does not evaluate shell text, request privileges, or run installation hooks.
 

@@ -16,6 +16,10 @@ MAX_CACHE_AGE_SECONDS=86400
 ACTIVE_TMP=""
 
 umask 077
+if ! ulimit -c 0 2>/dev/null; then
+  printf '%s\n' 'Steam Friends could not disable core dumps safely.' >&2
+  exit 70
+fi
 
 cleanup_active_tmp() {
   if [[ -n "$ACTIVE_TMP" && -e "$ACTIVE_TMP" ]]; then
@@ -28,14 +32,35 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+owned_directory() {
+  local path="$1"
+  local owner
+
+  [[ -d "$path" && ! -L "$path" ]] || return 1
+  owner="$(stat -c '%u' -- "$path" 2>/dev/null)" || return 1
+  [[ "$owner" == "$EUID" ]]
+}
+
+private_directory() {
+  local path="$1"
+  local mode mode_value
+
+  owned_directory "$path" || return 1
+  mode="$(stat -c '%a' -- "$path" 2>/dev/null)" || return 1
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  mode_value=$((8#$mode))
+  (( (mode_value & 077) == 0 ))
+}
+
 private_regular_file() {
   local path="$1"
-  local owner mode mode_value
+  local owner mode mode_value links
 
   [[ -f "$path" && ! -L "$path" && -r "$path" ]] || return 1
   owner="$(stat -c '%u' -- "$path" 2>/dev/null)" || return 1
   mode="$(stat -c '%a' -- "$path" 2>/dev/null)" || return 1
-  [[ "$owner" == "$EUID" && "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  links="$(stat -c '%h' -- "$path" 2>/dev/null)" || return 1
+  [[ "$owner" == "$EUID" && "$links" == "1" && "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
   mode_value=$((8#$mode))
   (( (mode_value & 077) == 0 ))
 }
@@ -43,6 +68,7 @@ private_regular_file() {
 cache_snapshot() {
   local size
 
+  private_directory "$CACHE_DIR" || return 1
   private_regular_file "$CACHE_FILE" || return 1
   size="$(stat -c '%s' -- "$CACHE_FILE" 2>/dev/null)" || return 1
   [[ "$size" =~ ^[0-9]+$ ]] || return 1
@@ -117,12 +143,10 @@ write_private_json() {
   local destination="$2"
   local prefix="$3"
   local content="$4"
-  local directory_owner
 
+  [[ ! -L "$directory" ]] || return 1
   mkdir -p -- "$directory" || return 1
-  [[ -d "$directory" ]] || return 1
-  directory_owner="$(stat -c '%u' -- "$directory" 2>/dev/null)" || return 1
-  [[ "$directory_owner" == "$EUID" ]] || return 1
+  owned_directory "$directory" || return 1
   ACTIVE_TMP="$(mktemp "${directory}/${prefix}.XXXXXX")" || return 1
   printf '%s\n' "$content" >"$ACTIVE_TMP" || return 1
   chmod 600 -- "$ACTIVE_TMP" || return 1
@@ -132,14 +156,11 @@ write_private_json() {
 }
 
 prepare_cache_dir() {
-  local owner
-
   [[ ! -L "$CACHE_DIR" ]] || return 1
   mkdir -p -- "$CACHE_DIR" || return 1
-  [[ -d "$CACHE_DIR" ]] || return 1
-  owner="$(stat -c '%u' -- "$CACHE_DIR" 2>/dev/null)" || return 1
-  [[ "$owner" == "$EUID" ]] || return 1
-  chmod 700 -- "$CACHE_DIR"
+  owned_directory "$CACHE_DIR" || return 1
+  chmod 700 -- "$CACHE_DIR" || return 1
+  private_directory "$CACHE_DIR"
 }
 
 json_error() {
@@ -202,6 +223,7 @@ detect_steam_id() {
 read_config() {
   local size
 
+  owned_directory "$CONFIG_DIR" || return 1
   private_regular_file "$CONFIG_FILE" || return 1
   size="$(stat -c '%s' -- "$CONFIG_FILE" 2>/dev/null)" || return 1
   [[ "$size" =~ ^[0-9]+$ ]] || return 1
@@ -218,21 +240,19 @@ api_get() {
   local endpoint="$1"
   local api_key="$2"
   shift 2
-  local parameter
 
   case "$endpoint" in
-    "${API_ROOT}/GetFriendList/v1/"|"${API_ROOT}/GetPlayerSummaries/v2/") ;;
+    "${API_ROOT}/GetFriendList/v1/")
+      (( $# == 2 )) || return 64
+      [[ "$1" =~ ^steamid=[0-9]{17}$ && "$2" == "relationship=friend" ]] || return 64
+      ;;
+    "${API_ROOT}/GetPlayerSummaries/v2/")
+      (( $# == 1 )) || return 64
+      [[ "$1" =~ ^steamids=[0-9]{17}(,[0-9]{17}){0,99}$ ]] || return 64
+      ;;
     *) return 64 ;;
   esac
   [[ "$api_key" =~ ^[A-Fa-f0-9]{32}$ ]] || return 64
-  for parameter in "$@"; do
-    case "$parameter" in
-      relationship=friend) ;;
-      steamid=*) [[ "$parameter" =~ ^steamid=[0-9]{17}$ ]] || return 64 ;;
-      steamids=*) [[ "$parameter" =~ ^steamids=[0-9]{17}(,[0-9]{17}){0,99}$ ]] || return 64 ;;
-      *) return 64 ;;
-    esac
-  done
 
   {
     printf '%s\n' \
@@ -405,36 +425,46 @@ snapshot() {
       return
     fi
 
-    next_players="$(jq -c '[.response.players[] | {
-      steamid,
-      personaname,
-      realname,
-      avatarfull,
-      avatarmedium,
-      avatar,
-      personastate,
-      personastateflags,
-      gameextrainfo,
-      gameid,
-      lastlogoff,
-      loccountrycode
-    }]' <<<"$response")" || {
+    next_players="$(jq -c '
+      def text($max):
+        if type == "string"
+        then gsub("[[:cntrl:]]"; " ")
+          | gsub("[\u202a-\u202e\u2066-\u2069]"; "")
+          | .[0:$max]
+        else ""
+        end;
+      def integer($min; $max):
+        (tonumber? // $min) | floor
+        | if . < $min then $min elif . > $max then $max else . end;
+
+      [.response.players[] | {
+        steamid,
+        personaname: ((.personaname // "") | text(128)),
+        realname: ((.realname // "") | text(128)),
+        avatarfull: ((.avatarfull // .avatarmedium // .avatar // "") | text(512)),
+        personastate: ((.personastate // 0) | integer(0; 6)),
+        personastateflags: ((.personastateflags // 0) | integer(0; 2147483647)),
+        gameextrainfo: ((.gameextrainfo // "") | text(256)),
+        gameid: ((.gameid // "") | tostring | if test("^[0-9]{1,12}$") then . else "" end),
+        lastlogoff: ((.lastlogoff // 0) | integer(0; 4102444800)),
+        loccountrycode: ((.loccountrycode // "") | text(2))
+      }]
+    ' <<<"$response")" || {
       json_error "Steam presence could not be reduced safely."
       return
     }
 
-    summaries_json="$(jq -cn \
-      --argjson previous "$summaries_json" \
-      --argjson next "$next_players" \
-      '$previous + $next')"
+    summaries_json="$(printf '%s\n%s\n' "$summaries_json" "$next_players" \
+      | jq -cs '.[0] + .[1]')" || {
+      json_error "Steam presence could not be accumulated safely."
+      return
+    }
   done
 
   local normalized
-  if ! normalized="$(jq -cn \
-    --arg selfId "$steam_id" \
-    --argjson friends "$friends_json" \
-    --argjson players "$summaries_json" \
-    '{selfId: $selfId, friends: $friends.friendslist, players: $players}' \
+  if ! normalized="$(printf '%s\n%s\n' "$friends_json" "$summaries_json" \
+    | jq -cs --arg selfId "$steam_id" \
+      '{selfId: $selfId, friends: .[0].friendslist, players: .[1]}' \
     | normalize_player)"; then
     json_error "Steam data could not be normalized."
     return
@@ -534,8 +564,7 @@ setup_account() {
   fi
   printf '\033[1;32mok\033[0m\n'
 
-  config_json="$(jq -cn --arg apiKey "$api_key" --arg steamId "$steam_id" \
-    '{apiKey: $apiKey, steamId: $steamId}')"
+  printf -v config_json '{"apiKey":"%s","steamId":"%s"}' "$api_key" "$steam_id"
   if ! write_private_json "$CONFIG_DIR" "$CONFIG_FILE" ".steam-friends" "$config_json"; then
     printf '\n\033[1;31mThe private configuration could not be written safely.\033[0m\n'
     api_key=""
