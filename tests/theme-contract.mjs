@@ -66,8 +66,8 @@ for (const directory of fs.readdirSync(themesDirectory).sort()) {
   const urgent = parseHex(palette.red || palette.color1 || palette.accent)
   const muted = parseHex(palette.muted || palette.color8 || palette.foreground)
 
-  const secondary = context.readableMuted(foreground, background, 4.5)
-  const quiet = context.readableMuted(foreground, background, 3.0)
+  const secondary = context.readableMuted(foreground, background, 5.5)
+  const quiet = context.readableMuted(foreground, background, 4.5)
   const accentGraphic = context.ensureContrast(accent, foreground, background, 3.0)
   const accentText = context.ensureContrast(accent, foreground, background, 4.5)
   const urgentGraphic = context.ensureContrast(urgent, foreground, background, 3.0)
@@ -75,8 +75,8 @@ for (const directory of fs.readdirSync(themesDirectory).sort()) {
   const mutedGraphic = context.ensureContrast(muted, quiet, background, 3.0)
 
   const checks = [
-    ["secondary text", secondary, 4.5],
-    ["quiet text", quiet, 3.0],
+    ["secondary text", secondary, 5.5],
+    ["quiet text", quiet, 4.5],
     ["accent graphic", accentGraphic, 3.0],
     ["accent text", accentText, 4.5],
     ["urgent graphic", urgentGraphic, 3.0],

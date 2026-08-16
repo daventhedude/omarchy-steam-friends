@@ -21,9 +21,9 @@ Panel {
   readonly property color accentColor: Color.accent
   readonly property color urgentColor: Color.urgent
   readonly property color secondaryText: Theme.readableMuted(
-    contentForeground, surfaceBackground, 4.5)
+    contentForeground, surfaceBackground, 5.5)
   readonly property color quietText: Theme.readableMuted(
-    contentForeground, surfaceBackground, 3.0)
+    contentForeground, surfaceBackground, 4.5)
   readonly property color accentGraphic: Theme.ensureContrast(
     accentColor, contentForeground, surfaceBackground, 3.0)
   readonly property color accentText: Theme.ensureContrast(
