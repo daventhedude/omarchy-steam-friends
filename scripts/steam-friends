@@ -1,0 +1,611 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+PLUGIN_NAME="Steam Friends"
+CONFIG_ROOT="${XDG_CONFIG_HOME:-${HOME}/.config}"
+CACHE_ROOT="${XDG_CACHE_HOME:-${HOME}/.cache}"
+CONFIG_DIR="${CONFIG_ROOT}/omarchy"
+CONFIG_FILE="${CONFIG_DIR}/steam-friends.json"
+CACHE_DIR="${CACHE_ROOT}/omarchy-steam-friends"
+CACHE_FILE="${CACHE_DIR}/snapshot.json"
+API_ROOT="https://api.steampowered.com/ISteamUser"
+MAX_RESPONSE_BYTES=2097152
+MAX_CACHE_BYTES=8388608
+MAX_CONFIG_BYTES=4096
+MAX_CACHE_AGE_SECONDS=86400
+ACTIVE_TMP=""
+
+umask 077
+
+cleanup_active_tmp() {
+  if [[ -n "$ACTIVE_TMP" && -e "$ACTIVE_TMP" ]]; then
+    rm -f -- "$ACTIVE_TMP"
+  fi
+}
+
+trap cleanup_active_tmp EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+private_regular_file() {
+  local path="$1"
+  local owner mode mode_value
+
+  [[ -f "$path" && ! -L "$path" && -r "$path" ]] || return 1
+  owner="$(stat -c '%u' -- "$path" 2>/dev/null)" || return 1
+  mode="$(stat -c '%a' -- "$path" 2>/dev/null)" || return 1
+  [[ "$owner" == "$EUID" && "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  mode_value=$((8#$mode))
+  (( (mode_value & 077) == 0 ))
+}
+
+cache_snapshot() {
+  local size
+
+  private_regular_file "$CACHE_FILE" || return 1
+  size="$(stat -c '%s' -- "$CACHE_FILE" 2>/dev/null)" || return 1
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  (( size > 0 && size <= MAX_CACHE_BYTES )) || return 1
+
+  jq -ce --argjson maxAge "$MAX_CACHE_AGE_SECONDS" '
+    def steam_id:
+      type == "string" and test("^[0-9]{17}$");
+    def safe_text($max):
+      type == "string" and length <= $max
+      and (test("[[:cntrl:]]") | not)
+      and (test("[\u202a-\u202e\u2066-\u2069]") | not);
+    def safe_avatar:
+      . == ""
+      or (type == "string" and length <= 1024 and (
+        test("^https://([A-Za-z0-9-]+\\.)*steamstatic\\.com/[A-Za-z0-9_./%?=&+-]+$")
+        or test("^https://steamcdn-a\\.akamaihd\\.net/steamcommunity/public/images/avatars/[A-Za-z0-9_./%?=&+-]+$")
+      ));
+    def player:
+      type == "object"
+      and (.steamId | steam_id)
+      and (.name | safe_text(128))
+      and (.realName | safe_text(128))
+      and (.profileUrl == ("https://steamcommunity.com/profiles/" + .steamId + "/"))
+      and (.avatar | safe_avatar)
+      and (.state | type == "number" and . >= 0 and . <= 6)
+      and (.stateFlags | type == "number" and . >= 0 and . <= 2147483647)
+      and (.gameName | safe_text(256))
+      and (.gameId | type == "string" and (. == "" or test("^[0-9]{1,12}$")))
+      and (.lastLogoff | type == "number" and . >= 0 and . <= 4102444800)
+      and (.friendSince | type == "number" and . >= 0 and . <= 4102444800)
+      and (.country | type == "string" and (. == "" or test("^[A-Z]{2}$")))
+      and (.isSelf | type == "boolean");
+
+    select(
+      type == "object"
+      and .ok == true
+      and .configured == true
+      and (.stale | type == "boolean")
+      and (.generatedAt | type == "number" and . >= 0 and . <= 4102444800)
+      and (.generatedAt >= (now - $maxAge) and .generatedAt <= (now + 300))
+      and (.self == null or (.self | player and .isSelf == true))
+      and (.friends | type == "array" and length <= 5000)
+      and all(.friends[]; player and (.isSelf | not))
+      and (([.friends[].steamId] | length) == ([.friends[].steamId] | unique | length))
+      and (.self == null or (
+        .self.steamId as $selfId
+        | ([.friends[].steamId] | index($selfId)) == null
+      ))
+    )
+    | .friends as $friends
+    | {
+        ok: true,
+        configured: true,
+        stale: true,
+        error: "",
+        warning: "",
+        generatedAt: .generatedAt,
+        self: .self,
+        friends: $friends,
+        counts: {
+          total: ($friends | length),
+          online: ($friends | map(select(.state > 0)) | length),
+          inGame: ($friends | map(select(.gameName != "")) | length)
+        }
+      }
+  ' "$CACHE_FILE"
+}
+
+write_private_json() {
+  local directory="$1"
+  local destination="$2"
+  local prefix="$3"
+  local content="$4"
+  local directory_owner
+
+  mkdir -p -- "$directory" || return 1
+  [[ -d "$directory" ]] || return 1
+  directory_owner="$(stat -c '%u' -- "$directory" 2>/dev/null)" || return 1
+  [[ "$directory_owner" == "$EUID" ]] || return 1
+  ACTIVE_TMP="$(mktemp "${directory}/${prefix}.XXXXXX")" || return 1
+  printf '%s\n' "$content" >"$ACTIVE_TMP" || return 1
+  chmod 600 -- "$ACTIVE_TMP" || return 1
+  mv -fT -- "$ACTIVE_TMP" "$destination" || return 1
+  ACTIVE_TMP=""
+  private_regular_file "$destination"
+}
+
+prepare_cache_dir() {
+  local owner
+
+  [[ ! -L "$CACHE_DIR" ]] || return 1
+  mkdir -p -- "$CACHE_DIR" || return 1
+  [[ -d "$CACHE_DIR" ]] || return 1
+  owner="$(stat -c '%u' -- "$CACHE_DIR" 2>/dev/null)" || return 1
+  [[ "$owner" == "$EUID" ]] || return 1
+  chmod 700 -- "$CACHE_DIR"
+}
+
+json_error() {
+  local message="$1"
+  local configured="${2:-true}"
+  local cached=""
+
+  if [[ "$configured" == "true" ]] && cached="$(cache_snapshot 2>/dev/null)"; then
+    jq -c --arg warning "$message" \
+      '. + {ok: true, configured: true, stale: true, warning: $warning}' \
+      <<<"$cached"
+    return
+  fi
+
+  jq -cn \
+    --argjson configured "$configured" \
+    --arg message "$message" \
+    '{
+      ok: false,
+      configured: $configured,
+      stale: false,
+      error: $message,
+      warning: "",
+      generatedAt: 0,
+      self: null,
+      friends: [],
+      counts: {total: 0, online: 0, inGame: 0}
+    }'
+}
+
+detect_steam_id() {
+  local candidate=""
+  local login_file=""
+  local -a candidates=(
+    "${HOME}/.local/share/Steam/config/loginusers.vdf"
+    "${HOME}/.steam/steam/config/loginusers.vdf"
+    "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/config/loginusers.vdf"
+  )
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -r "$candidate" ]]; then
+      login_file="$candidate"
+      break
+    fi
+  done
+
+  [[ -n "$login_file" ]] || return 1
+
+  awk '
+    match($0, /"([0-9]{17})"/, id) {
+      if (first == "") first = id[1]
+      current = id[1]
+      next
+    }
+    current != "" && /"MostRecent"[[:space:]]+"1"/ { print current; found = 1; exit }
+    END { if (!found && first != "") print first }
+  ' "$login_file" | head -n 1
+}
+
+read_config() {
+  local size
+
+  private_regular_file "$CONFIG_FILE" || return 1
+  size="$(stat -c '%s' -- "$CONFIG_FILE" 2>/dev/null)" || return 1
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  (( size > 0 && size <= MAX_CONFIG_BYTES )) || return 1
+  jq -e '
+    type == "object" and
+    (.apiKey | type == "string" and test("^[A-Fa-f0-9]{32}$")) and
+    (.steamId | type == "string" and test("^[0-9]{17}$")) and
+    (keys | sort == ["apiKey", "steamId"])
+  ' "$CONFIG_FILE" >/dev/null 2>&1
+}
+
+api_get() {
+  local endpoint="$1"
+  local api_key="$2"
+  shift 2
+  local parameter
+
+  case "$endpoint" in
+    "${API_ROOT}/GetFriendList/v1/"|"${API_ROOT}/GetPlayerSummaries/v2/") ;;
+    *) return 64 ;;
+  esac
+  [[ "$api_key" =~ ^[A-Fa-f0-9]{32}$ ]] || return 64
+  for parameter in "$@"; do
+    case "$parameter" in
+      relationship=friend) ;;
+      steamid=*) [[ "$parameter" =~ ^steamid=[0-9]{17}$ ]] || return 64 ;;
+      steamids=*) [[ "$parameter" =~ ^steamids=[0-9]{17}(,[0-9]{17}){0,99}$ ]] || return 64 ;;
+      *) return 64 ;;
+    esac
+  done
+
+  {
+    printf '%s\n' \
+      'get' \
+      'silent' \
+      'show-error' \
+      'fail-with-body' \
+      'connect-timeout = 4' \
+      'max-time = 12' \
+      'retry = 1' \
+      'retry-delay = 1' \
+      'header = "Accept: application/json"'
+    printf 'url = "%s"\n' "$endpoint"
+    printf 'header = "x-webapi-key: %s"\n' "$api_key"
+    for parameter in "$@"; do
+      printf 'data-urlencode = "%s"\n' "$parameter"
+    done
+  } | curl --disable \
+    --proto '=https' \
+    --tlsv1.2 \
+    --max-filesize "$MAX_RESPONSE_BYTES" \
+    --config -
+}
+
+normalize_player() {
+  jq -c '
+    def text($max):
+      if type == "string"
+      then gsub("[[:cntrl:]]"; " ")
+        | gsub("[\u202a-\u202e\u2066-\u2069]"; "")
+        | .[0:$max]
+      else ""
+      end;
+    def integer($min; $max):
+      (tonumber? // $min) | floor | if . < $min then $min elif . > $max then $max else . end;
+    def steam_id:
+      type == "string" and test("^[0-9]{17}$");
+    def avatar:
+      (. // "" | text(1024)) as $url
+      | if (
+          $url | test("^https://([A-Za-z0-9-]+\\.)*steamstatic\\.com/[A-Za-z0-9_./%?=&+-]+$")
+          or test("^https://steamcdn-a\\.akamaihd\\.net/steamcommunity/public/images/avatars/[A-Za-z0-9_./%?=&+-]+$")
+        ) then $url else "" end;
+    def player($friendMap; $selfId):
+      . as $p
+      | ($friendMap[$p.steamid] // {}) as $friend
+      | {
+          steamId: $p.steamid,
+          name: (($p.personaname // "Unknown") | text(128) | if . == "" then "Unknown" else . end),
+          realName: (($p.realname // "") | text(128)),
+          profileUrl: ("https://steamcommunity.com/profiles/" + $p.steamid + "/"),
+          avatar: (($p.avatarfull // $p.avatarmedium // $p.avatar // "") | avatar),
+          state: (($p.personastate // 0) | integer(0; 6)),
+          stateFlags: (($p.personastateflags // 0) | integer(0; 2147483647)),
+          gameName: (($p.gameextrainfo // "") | text(256)),
+          gameId: (($p.gameid // "") | tostring | if test("^[0-9]{1,12}$") then . else "" end),
+          lastLogoff: (($p.lastlogoff // 0) | integer(0; 4102444800)),
+          friendSince: (($friend.friend_since // 0) | integer(0; 4102444800)),
+          country: (($p.loccountrycode // "") | text(2) | ascii_upcase | if test("^[A-Z]{2}$") then . else "" end),
+          isSelf: ($p.steamid == $selfId)
+        };
+
+    . as $input
+    | ($input.friends.friends // []
+      | map({key: .steamid, value: .})
+      | from_entries) as $friendMap
+    | ($input.players
+      | map(select(
+          (.steamid | steam_id)
+          and (.steamid == $input.selfId or $friendMap[.steamid] != null)
+        ))
+      | map(player($friendMap; $input.selfId))
+      | unique_by(.steamId)) as $players
+    | ($players | map(select(.isSelf)) | first // null) as $self
+    | ($players
+      | map(select(.isSelf | not))
+      | sort_by(
+          (if .gameName != "" then 0 elif .state > 0 then 1 else 2 end),
+          (.name | ascii_downcase)
+        )) as $friends
+    | {
+        ok: true,
+        configured: true,
+        stale: false,
+        error: "",
+        warning: "",
+        generatedAt: (now | floor),
+        self: $self,
+        friends: $friends,
+        counts: {
+          total: ($friends | length),
+          online: ($friends | map(select(.state > 0)) | length),
+          inGame: ($friends | map(select(.gameName != "")) | length)
+        }
+      }
+  '
+}
+
+snapshot() {
+  if ! read_config; then
+    jq -cn '{
+      ok: false,
+      configured: false,
+      stale: false,
+      error: "",
+      warning: "",
+      generatedAt: 0,
+      self: null,
+      friends: [],
+      counts: {total: 0, online: 0, inGame: 0}
+    }'
+    return
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    json_error "Steam Friends requires curl, but it is not installed."
+    return
+  fi
+
+  local api_key steam_id friends_json summaries_json response ids_csv next_players
+  local -a friend_ids all_ids batch
+  api_key="$(jq -r '.apiKey' "$CONFIG_FILE")"
+  steam_id="$(jq -r '.steamId' "$CONFIG_FILE")"
+
+  if ! friends_json="$(api_get \
+    "${API_ROOT}/GetFriendList/v1/" \
+    "$api_key" \
+    "steamid=${steam_id}" \
+    'relationship=friend' 2>/dev/null)"; then
+    json_error "Steam rejected the friends request. Check the API key and make sure your friends list is public."
+    return
+  fi
+
+  if ! jq -e '
+    .friendslist.friends | type == "array"
+    and length <= 5000
+    and all(.[]; (
+      type == "object"
+      and (.steamid | type == "string" and test("^[0-9]{17}$"))
+      and (.friend_since | type == "number" and . >= 0 and . <= 4102444800)
+    ))
+  ' <<<"$friends_json" >/dev/null 2>&1; then
+    json_error "Steam returned an unexpected friends response."
+    return
+  fi
+
+  mapfile -t friend_ids < <(jq -r '.friendslist.friends | map(.steamid) | unique[]' <<<"$friends_json")
+  all_ids=("$steam_id" "${friend_ids[@]}")
+  summaries_json='[]'
+
+  local start
+  for ((start = 0; start < ${#all_ids[@]}; start += 100)); do
+    batch=("${all_ids[@]:start:100}")
+    ids_csv="$(IFS=,; printf '%s' "${batch[*]}")"
+
+    if ! response="$(api_get \
+      "${API_ROOT}/GetPlayerSummaries/v2/" \
+      "$api_key" \
+      "steamids=${ids_csv}" 2>/dev/null)"; then
+      json_error "Steam presence is temporarily unavailable."
+      return
+    fi
+
+    if ! jq -e '
+      .response.players | type == "array"
+      and length <= 100
+      and all(.[]; type == "object" and (.steamid | type == "string" and test("^[0-9]{17}$")))
+    ' <<<"$response" >/dev/null 2>&1; then
+      json_error "Steam returned an unexpected presence response."
+      return
+    fi
+
+    next_players="$(jq -c '[.response.players[] | {
+      steamid,
+      personaname,
+      realname,
+      avatarfull,
+      avatarmedium,
+      avatar,
+      personastate,
+      personastateflags,
+      gameextrainfo,
+      gameid,
+      lastlogoff,
+      loccountrycode
+    }]' <<<"$response")" || {
+      json_error "Steam presence could not be reduced safely."
+      return
+    }
+
+    summaries_json="$(jq -cn \
+      --argjson previous "$summaries_json" \
+      --argjson next "$next_players" \
+      '$previous + $next')"
+  done
+
+  local normalized
+  if ! normalized="$(jq -cn \
+    --arg selfId "$steam_id" \
+    --argjson friends "$friends_json" \
+    --argjson players "$summaries_json" \
+    '{selfId: $selfId, friends: $friends.friendslist, players: $players}' \
+    | normalize_player)"; then
+    json_error "Steam data could not be normalized."
+    return
+  fi
+
+  if ! prepare_cache_dir \
+    || ! write_private_json "$CACHE_DIR" "$CACHE_FILE" ".snapshot" "$normalized"; then
+    normalized="$(jq -c '.warning = "Presence loaded, but the private cache could not be updated."' <<<"$normalized")"
+  fi
+  printf '%s\n' "$normalized"
+}
+
+setup_account() {
+  local detected_id current_id steam_id api_key response friends_response input_id config_json
+  detected_id="$(detect_steam_id 2>/dev/null || true)"
+  current_id=""
+
+  if read_config; then
+    current_id="$(jq -r '.steamId // empty' "$CONFIG_FILE" 2>/dev/null || true)"
+  fi
+
+  clear
+  printf '\033[1;36m%s\033[0m\n' '╭──────────────────────────────────────────────╮'
+  printf '\033[1;36m│\033[0m    %-39s\033[1;36m│\033[0m\n' "$PLUGIN_NAME setup"
+  printf '\033[1;36m%s\033[0m\n\n' '╰──────────────────────────────────────────────╯'
+  printf 'This wizard stores your Steam Web API key locally in:\n  %s\n\n' "$CONFIG_FILE"
+  printf 'The file is private to your user (mode 0600). The key is never\n'
+  printf 'written to Omarchy shell.json or printed by the plugin.\n\n'
+
+  if ! command -v curl >/dev/null 2>&1; then
+    printf '\033[1;31mcurl is required but is not installed.\033[0m\n'
+    read -r -p 'Press Enter to close…'
+    return 1
+  fi
+
+  if [[ -n "$detected_id" ]]; then
+    printf 'Detected Steam ID: \033[1m%s\033[0m\n' "$detected_id"
+  fi
+
+  steam_id="${current_id:-$detected_id}"
+  read -r -p "Steam ID [${steam_id:-required}]: " input_id
+  steam_id="${input_id:-$steam_id}"
+
+  if [[ ! "$steam_id" =~ ^[0-9]{17}$ ]]; then
+    printf '\n\033[1;31mInvalid Steam ID. It must contain exactly 17 digits.\033[0m\n'
+    read -r -p 'Press Enter to close…'
+    return 1
+  fi
+
+  printf '\nCreate a user API key at:\n'
+  printf '\033[4;36mhttps://steamcommunity.com/dev/apikey\033[0m\n\n'
+  read -r -s -p 'Steam Web API key (input hidden): ' api_key
+  printf '\n'
+
+  if [[ ! "$api_key" =~ ^[A-Fa-f0-9]{32}$ ]]; then
+    printf '\n\033[1;31mInvalid API key. Steam user keys contain 32 hexadecimal characters.\033[0m\n'
+    api_key=""
+    read -r -p 'Press Enter to close…'
+    return 1
+  fi
+
+  printf '\nValidating with Steam… '
+  if ! response="$(api_get \
+    "${API_ROOT}/GetPlayerSummaries/v2/" \
+    "$api_key" \
+    "steamids=${steam_id}" 2>/dev/null)" \
+    || ! jq -e --arg id "$steam_id" \
+      '.response.players | any(.steamid == $id)' <<<"$response" >/dev/null 2>&1; then
+    printf '\033[1;31mfailed\033[0m\n\n'
+    printf 'Steam rejected the key or Steam ID. Check both values and try again.\n'
+    api_key=""
+    read -r -p 'Press Enter to close…'
+    return 1
+  fi
+  printf '\033[1;32mok\033[0m\n'
+
+  printf 'Checking friends-list access… '
+  if ! friends_response="$(api_get \
+    "${API_ROOT}/GetFriendList/v1/" \
+    "$api_key" \
+    "steamid=${steam_id}" \
+    'relationship=friend' 2>/dev/null)" \
+    || ! jq -e '
+      .friendslist.friends | type == "array"
+      and length <= 5000
+      and all(.[]; (
+        type == "object"
+        and (.steamid | type == "string" and test("^[0-9]{17}$"))
+        and (.friend_since | type == "number" and . >= 0 and . <= 4102444800)
+      ))
+    ' <<<"$friends_response" >/dev/null 2>&1; then
+    printf '\033[1;31mfailed\033[0m\n\n'
+    printf 'Steam did not grant friends-list access. Make the list public and try again.\n'
+    api_key=""
+    read -r -p 'Press Enter to close…'
+    return 1
+  fi
+  printf '\033[1;32mok\033[0m\n'
+
+  config_json="$(jq -cn --arg apiKey "$api_key" --arg steamId "$steam_id" \
+    '{apiKey: $apiKey, steamId: $steamId}')"
+  if ! write_private_json "$CONFIG_DIR" "$CONFIG_FILE" ".steam-friends" "$config_json"; then
+    printf '\n\033[1;31mThe private configuration could not be written safely.\033[0m\n'
+    api_key=""
+    config_json=""
+    read -r -p 'Press Enter to close…'
+    return 1
+  fi
+  api_key=""
+  config_json=""
+
+  printf '\n\033[1;32m✓ Steam Friends is connected.\033[0m\n'
+  printf 'Your Omarchy panel will refresh automatically.\n\n'
+  read -r -p 'Press Enter to close…'
+}
+
+demo_snapshot() {
+  cat <<'JSON'
+{
+  "ok": true,
+  "configured": true,
+  "stale": false,
+  "error": "",
+  "warning": "",
+  "generatedAt": 1786872000,
+  "self": {
+    "steamId": "00000000000000000",
+    "name": "Orbit",
+    "realName": "",
+    "profileUrl": "https://steamcommunity.com/profiles/00000000000000000/",
+    "avatar": "",
+    "state": 1,
+    "stateFlags": 0,
+    "gameName": "",
+    "gameId": "",
+    "lastLogoff": 1786871200,
+    "friendSince": 0,
+    "country": "",
+    "isSelf": true
+  },
+  "friends": [
+    {"steamId":"00000000000000001","name":"Moonbyte","realName":"","profileUrl":"https://steamcommunity.com/profiles/00000000000000001/","avatar":"","state":1,"stateFlags":0,"gameName":"Counter-Strike 2","gameId":"730","lastLogoff":1786871000,"friendSince":1514764800,"country":"","isSelf":false},
+    {"steamId":"00000000000000002","name":"SynthRider","realName":"","profileUrl":"https://steamcommunity.com/profiles/00000000000000002/","avatar":"","state":1,"stateFlags":0,"gameName":"HELLDIVERS 2","gameId":"553850","lastLogoff":1786870800,"friendSince":1609459200,"country":"","isSelf":false},
+    {"steamId":"00000000000000003","name":"ArcadeGhost","realName":"","profileUrl":"https://steamcommunity.com/profiles/00000000000000003/","avatar":"","state":1,"stateFlags":0,"gameName":"","gameId":"","lastLogoff":1786871600,"friendSince":1546300800,"country":"","isSelf":false},
+    {"steamId":"00000000000000004","name":"LowOrbit","realName":"","profileUrl":"https://steamcommunity.com/profiles/00000000000000004/","avatar":"","state":3,"stateFlags":0,"gameName":"","gameId":"","lastLogoff":1786869000,"friendSince":1640995200,"country":"","isSelf":false},
+    {"steamId":"00000000000000005","name":"PixelPilot","realName":"","profileUrl":"https://steamcommunity.com/profiles/00000000000000005/","avatar":"","state":0,"stateFlags":0,"gameName":"","gameId":"","lastLogoff":1786785600,"friendSince":1483228800,"country":"","isSelf":false}
+  ],
+  "counts": {"total":5,"online":4,"inGame":2}
+}
+JSON
+}
+
+missing_jq_snapshot() {
+  printf '%s\n' '{"ok":false,"configured":false,"stale":false,"error":"Steam Friends requires jq, but it is not installed.","warning":"","generatedAt":0,"self":null,"friends":[],"counts":{"total":0,"online":0,"inGame":0}}'
+}
+
+case "${1:-snapshot}" in
+  snapshot)
+    if command -v jq >/dev/null 2>&1; then snapshot; else missing_jq_snapshot; fi
+    ;;
+  setup)
+    if command -v jq >/dev/null 2>&1; then
+      setup_account
+    else
+      printf '%s\n' 'Steam Friends requires jq, but it is not installed.' >&2
+      exit 69
+    fi
+    ;;
+  demo) demo_snapshot ;;
+  *)
+    printf 'Usage: %s [snapshot|setup|demo]\n' "${0##*/}" >&2
+    exit 64
+    ;;
+esac

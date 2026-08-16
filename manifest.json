@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.daventhedude.steam-friends",
+  "name": "Steam Friends",
+  "version": "1.0.0",
+  "author": "Daven Niemann",
+  "license": "MIT",
+  "description": "A polished Steam friends presence panel for the Omarchy bar, with live game activity, avatars, search, and native Steam actions.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Steam Friends",
+    "description": "See who's online or in-game and jump straight into chat, profiles, and Steam.",
+    "category": "Social",
+    "aliases": [
+      "steam",
+      "friends",
+      "gaming",
+      "presence"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "showOffline": false,
+      "refreshIntervalSec": 60,
+      "backgroundRefreshSec": 300
+    },
+    "schema": [
+      {
+        "key": "showOffline",
+        "type": "boolean",
+        "label": "Show offline friends",
+        "defaultValue": false,
+        "description": "Include offline friends in the All tab and search results."
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Open-panel refresh (seconds)",
+        "min": 30,
+        "max": 300,
+        "step": 15,
+        "defaultValue": 60
+      },
+      {
+        "key": "backgroundRefreshSec",
+        "type": "integer",
+        "label": "Background refresh (seconds)",
+        "min": 120,
+        "max": 1800,
+        "step": 60,
+        "defaultValue": 300
+      }
+    ]
+  }
+}
