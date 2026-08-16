@@ -43,6 +43,8 @@ After installation, click the Steam icon and select **Open secure setup**. The t
 
 The key is deliberately kept out of Omarchy's inline widget settings and shell logs. Existing credential files are accepted only when they are single-link, regular, user-owned, non-symlink files without group or world permissions.
 
+Before connecting, review the [Privacy and Steam Data Notice](PRIVACY.md). By continuing, you direct the plugin to retrieve the listed Steam data for local display and caching under your own Steam Web API key.
+
 ## Remove
 
 Remove the plugin and its bar entry with Omarchy's own plugin manager:
@@ -84,9 +86,9 @@ Open **Omarchy → Setup → Bar** and edit Steam Friends to change:
 
 The helper talks only to Valve's official HTTPS Web API endpoint. It sends the user-provided key in Steam's supported `x-webapi-key` header through `curl` standard input, disables user curl configuration, enforces TLS, and limits response sizes. The key is therefore absent from request URLs, process arguments, QML, logs, snapshots, and the repository.
 
-Steam IDs and every response field are validated and length-bounded before entering QML. Profile URLs are reconstructed from validated IDs; avatars are limited to HTTPS Steam CDN hosts; dynamic text is rendered as plain text. The last valid snapshot is stored in a `0700` cache directory as a `0600` file and is accepted for at most 24 hours.
+Steam IDs and every response field are validated and length-bounded before entering QML. Profile URLs are reconstructed from validated IDs; avatars are limited to HTTPS Steam CDN hosts; dynamic text is rendered as plain text. The last valid snapshot is stored in a `0700` cache directory as a `0600` file and is accepted for at most 24 hours. A fresh account-bound snapshot is reused for 60 seconds, keeping automatic API traffic below Valve's daily limit even at the supported collection boundary.
 
-See [SECURITY.md](SECURITY.md) for the complete trust model, data flow, retention policy, and vulnerability-reporting process.
+See [PRIVACY.md](PRIVACY.md) for the data-use, local-storage, Steam-data disclaimer, and non-affiliation notice. See [SECURITY.md](SECURITY.md) for the complete trust model and vulnerability-reporting process.
 
 As with every Omarchy shell plugin, the code runs with your user permissions. Review the small helper script before installing if you would like to verify the complete data path.
 

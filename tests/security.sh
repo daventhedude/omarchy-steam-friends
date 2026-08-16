@@ -78,6 +78,11 @@ fi
 if rg -q -- '--argjson (previous|next|friends|players)' "$BACKEND"; then
   fail 'Steam collections are exposed to the process argument-size limit'
 fi
+jq -e '.barWidget.schema[] | select(.key == "refreshIntervalSec") | .min >= 60' \
+  "${REPO_ROOT}/manifest.json" >/dev/null \
+  || fail 'UI refresh floor can exceed the documented Steam request budget'
+rg -q --fixed-strings 'Math.max(60,' "${REPO_ROOT}/Panel.qml" \
+  || fail 'runtime refresh floor can exceed the documented Steam request budget'
 
 cat >"${TEST_BIN}/curl" <<'FAKE_CURL'
 #!/usr/bin/env bash
@@ -99,6 +104,7 @@ if [[ "$FAKE_STEAM_MODE" == "network-failure" ]]; then
 fi
 
 if [[ "$config" == *'/GetFriendList/v1/'* ]]; then
+  [[ "$(rg -c '^data-urlencode = ' <<<"$config")" == "2" ]] || exit 96
   [[ "$config" == *"data-urlencode = \"steamid=${EXPECTED_SELF_ID}\""* ]] || exit 97
   [[ "$config" == *'data-urlencode = "relationship=friend"'* ]] || exit 98
   if [[ "$FAKE_STEAM_MODE" == "invalid-friend-id" ]]; then
@@ -115,6 +121,7 @@ if [[ "$config" == *'/GetFriendList/v1/'* ]]; then
 fi
 
 if [[ "$config" == *'/GetPlayerSummaries/v2/'* ]]; then
+  [[ "$(rg -c '^data-urlencode = ' <<<"$config")" == "1" ]] || exit 96
   if [[ "$FAKE_STEAM_MODE" == "large" ]]; then
     summary_ids="$(sed -n 's/^data-urlencode = "steamids=\([0-9,]*\)"$/\1/p' <<<"$config")"
     [[ -n "$summary_ids" ]] || exit 99
@@ -146,6 +153,7 @@ assert_jq '.configured == false and .ok == false and (.friends | length == 0)' "
 write_config
 snapshot="$(run_snapshot)"
 assert_jq '.ok and .configured and (.friends | length == 2)' "$snapshot"
+assert_jq '.accountId == "00000000000000000"' "$snapshot"
 assert_jq '.counts == {"total":2,"online":2,"inGame":1}' "$snapshot"
 assert_jq '.self.profileUrl == "https://steamcommunity.com/profiles/00000000000000000/"' "$snapshot"
 assert_jq '.self.avatar == "https://avatars.fastly.steamstatic.com/abc_full.jpg"' "$snapshot"
@@ -161,13 +169,34 @@ if rg -q --fixed-strings "$TEST_KEY" "${TEST_CACHE}/omarchy-steam-friends/snapsh
   fail 'cache contains the API key'
 fi
 
-# A network outage uses only a recent, private, schema-valid cache.
+# A fresh, account-bound cache rate-limits repeat requests without contacting
+# curl, then remains available as stale data during a real network outage.
 FAKE_STEAM_MODE=network-failure
+before_calls="$(wc -l <"$FAKE_CURL_LOG")"
+rate_limited="$(run_snapshot)"
+after_calls="$(wc -l <"$FAKE_CURL_LOG")"
+assert_jq '.ok and (.stale | not) and (.warning == "")' "$rate_limited"
+[[ "$before_calls" == "$after_calls" ]] || fail 'fresh cache did not rate-limit curl'
+jq '.generatedAt = (now - 61 | floor)' \
+  "${TEST_CACHE}/omarchy-steam-friends/snapshot.json" \
+  >"${TEST_CACHE}/omarchy-steam-friends/aged.json"
+mv "${TEST_CACHE}/omarchy-steam-friends/aged.json" "${TEST_CACHE}/omarchy-steam-friends/snapshot.json"
+chmod 600 "${TEST_CACHE}/omarchy-steam-friends/snapshot.json"
 cached="$(run_snapshot)"
 assert_jq '.ok and .configured and .stale and (.warning | length > 0)' "$cached"
 
+# A structurally valid cache from a different configured account is rejected.
+jq '.accountId = "99999999999999999"' \
+  "${TEST_CACHE}/omarchy-steam-friends/snapshot.json" \
+  >"${TEST_CACHE}/omarchy-steam-friends/mismatched.json"
+mv "${TEST_CACHE}/omarchy-steam-friends/mismatched.json" "${TEST_CACHE}/omarchy-steam-friends/snapshot.json"
+chmod 600 "${TEST_CACHE}/omarchy-steam-friends/snapshot.json"
+mismatched_cache="$(run_snapshot)"
+assert_jq '(.ok | not) and .configured and (.stale | not)' "$mismatched_cache"
+
 # An old or permission-broad cache is never used as live presence.
-jq '.generatedAt = (now - 90000 | floor)' \
+jq --arg accountId "$TEST_SELF_ID" \
+  '.accountId = $accountId | .generatedAt = (now - 90000 | floor)' \
   "${TEST_CACHE}/omarchy-steam-friends/snapshot.json" \
   >"${TEST_CACHE}/omarchy-steam-friends/expired.json"
 mv "${TEST_CACHE}/omarchy-steam-friends/expired.json" "${TEST_CACHE}/omarchy-steam-friends/snapshot.json"
@@ -243,6 +272,8 @@ assert_jq '.ok and (.counts == {total: 5000, online: 5000, inGame: 0})' "$large_
 unlink "${TEST_CONFIG}/omarchy/steam-friends.json"
 setup_output="$(run_setup)"
 [[ "$setup_output" != *"$TEST_KEY"* ]] || fail 'setup printed the API key'
+[[ "$setup_output" == *'PRIVACY.md'* && "$setup_output" == *'provided as-is'* ]] \
+  || fail 'setup omitted the Steam data notice'
 [[ "$(stat -c '%a' "${TEST_CONFIG}/omarchy/steam-friends.json")" == "600" ]] || fail 'setup config mode is not 0600'
 [[ "$(stat -c '%h' "${TEST_CONFIG}/omarchy/steam-friends.json")" == "1" ]] || fail 'setup config is hardlinked'
 jq -e --arg apiKey "$TEST_KEY" --arg steamId "$TEST_SELF_ID" \

@@ -42,7 +42,7 @@
         "key": "refreshIntervalSec",
         "type": "integer",
         "label": "Open-panel refresh (seconds)",
-        "min": 30,
+        "min": 60,
         "max": 300,
         "step": 15,
         "defaultValue": 60

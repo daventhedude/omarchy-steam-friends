@@ -82,7 +82,7 @@ Panel {
   readonly property int totalCount: Model.safeCount(snapshot, "total")
   readonly property bool showOffline: setting("showOffline", false) === true
   readonly property int browsableCount: showOffline ? totalCount : onlineCount
-  readonly property int refreshIntervalSec: Math.max(30,
+  readonly property int refreshIntervalSec: Math.max(60,
     Math.min(300, Number(setting("refreshIntervalSec", 60)) || 60))
   readonly property int backgroundRefreshSec: Math.max(120,
     Math.min(1800, Number(setting("backgroundRefreshSec", 300)) || 300))

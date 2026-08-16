@@ -23,6 +23,7 @@ The plugin has no telemetry and does not operate a third-party server.
 - Writes use private temporary files followed by an atomic rename. The dedicated cache directory is mode `0700`; files are mode `0600`.
 - The credential-handling helper fails closed unless it can set its process core-dump limit to zero before reading the API key.
 - Cached presence is schema-validated, stripped of unknown fields, and expires after 24 hours.
+- Caches are bound to the configured Steam ID. A valid snapshot no older than 60 seconds is reused before networking, bounding automatic API traffic.
 - External programs are started with argument arrays. The plugin does not evaluate shell text, request privileges, or run installation hooks.
 
 ## Scope and limitations
@@ -32,6 +33,8 @@ The model protects against malformed Steam responses, poisoned cache/config file
 It cannot protect credentials from the same Unix user, root, a compromised Omarchy shell process, a malicious replacement for system executables, or a compromised operating system. Valve necessarily receives the API key and requested Steam IDs. Users remain subject to the [Steam Web API Terms of Use](https://steamcommunity.com/dev/apiterms).
 
 Each user supplies their own standard user Web API key. Publisher keys and shared maintainer keys must never be used with this plugin.
+
+The separate [Privacy and Steam Data Notice](PRIVACY.md) documents every retained field, local storage, deletion, Valve's required Steam-data disclaimer, and project non-affiliation.
 
 ## Storage and removal
 

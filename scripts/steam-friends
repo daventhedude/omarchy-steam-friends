@@ -13,7 +13,9 @@ MAX_RESPONSE_BYTES=2097152
 MAX_CACHE_BYTES=8388608
 MAX_CONFIG_BYTES=4096
 MAX_CACHE_AGE_SECONDS=86400
+MIN_NETWORK_INTERVAL_SECONDS=60
 ACTIVE_TMP=""
+CURRENT_STEAM_ID=""
 
 umask 077
 if ! ulimit -c 0 2>/dev/null; then
@@ -66,15 +68,24 @@ private_regular_file() {
 }
 
 cache_snapshot() {
+  local expected_id="$1"
+  local max_age="${2:-$MAX_CACHE_AGE_SECONDS}"
+  local stale="${3:-true}"
   local size
 
+  [[ "$expected_id" =~ ^[0-9]{17}$ ]] || return 1
+  [[ "$max_age" =~ ^[0-9]+$ ]] || return 1
+  [[ "$stale" == "true" || "$stale" == "false" ]] || return 1
   private_directory "$CACHE_DIR" || return 1
   private_regular_file "$CACHE_FILE" || return 1
   size="$(stat -c '%s' -- "$CACHE_FILE" 2>/dev/null)" || return 1
   [[ "$size" =~ ^[0-9]+$ ]] || return 1
   (( size > 0 && size <= MAX_CACHE_BYTES )) || return 1
 
-  jq -ce --argjson maxAge "$MAX_CACHE_AGE_SECONDS" '
+  jq -ce \
+    --arg expectedId "$expected_id" \
+    --argjson maxAge "$max_age" \
+    --argjson stale "$stale" '
     def steam_id:
       type == "string" and test("^[0-9]{17}$");
     def safe_text($max):
@@ -107,6 +118,7 @@ cache_snapshot() {
       type == "object"
       and .ok == true
       and .configured == true
+      and .accountId == $expectedId
       and (.stale | type == "boolean")
       and (.generatedAt | type == "number" and . >= 0 and . <= 4102444800)
       and (.generatedAt >= (now - $maxAge) and .generatedAt <= (now + 300))
@@ -115,6 +127,8 @@ cache_snapshot() {
       and all(.friends[]; player and (.isSelf | not))
       and (([.friends[].steamId] | length) == ([.friends[].steamId] | unique | length))
       and (.self == null or (
+        .self.steamId == .accountId
+        and
         .self.steamId as $selfId
         | ([.friends[].steamId] | index($selfId)) == null
       ))
@@ -123,7 +137,8 @@ cache_snapshot() {
     | {
         ok: true,
         configured: true,
-        stale: true,
+        accountId: .accountId,
+        stale: $stale,
         error: "",
         warning: "",
         generatedAt: .generatedAt,
@@ -168,7 +183,8 @@ json_error() {
   local configured="${2:-true}"
   local cached=""
 
-  if [[ "$configured" == "true" ]] && cached="$(cache_snapshot 2>/dev/null)"; then
+  if [[ "$configured" == "true" ]] \
+    && cached="$(cache_snapshot "$CURRENT_STEAM_ID" "$MAX_CACHE_AGE_SECONDS" true 2>/dev/null)"; then
     jq -c --arg warning "$message" \
       '. + {ok: true, configured: true, stale: true, warning: $warning}' \
       <<<"$cached"
@@ -336,6 +352,7 @@ normalize_player() {
     | {
         ok: true,
         configured: true,
+        accountId: $input.selfId,
         stale: false,
         error: "",
         warning: "",
@@ -367,15 +384,22 @@ snapshot() {
     return
   fi
 
+  local api_key steam_id recent_snapshot friends_json summaries_json response ids_csv next_players
+  local -a friend_ids all_ids batch
+  api_key="$(jq -r '.apiKey' "$CONFIG_FILE")"
+  steam_id="$(jq -r '.steamId' "$CONFIG_FILE")"
+  CURRENT_STEAM_ID="$steam_id"
+
+  if recent_snapshot="$(cache_snapshot \
+    "$steam_id" "$MIN_NETWORK_INTERVAL_SECONDS" false 2>/dev/null)"; then
+    printf '%s\n' "$recent_snapshot"
+    return
+  fi
+
   if ! command -v curl >/dev/null 2>&1; then
     json_error "Steam Friends requires curl, but it is not installed."
     return
   fi
-
-  local api_key steam_id friends_json summaries_json response ids_csv next_players
-  local -a friend_ids all_ids batch
-  api_key="$(jq -r '.apiKey' "$CONFIG_FILE")"
-  steam_id="$(jq -r '.steamId' "$CONFIG_FILE")"
 
   if ! friends_json="$(api_get \
     "${API_ROOT}/GetFriendList/v1/" \
@@ -478,9 +502,10 @@ snapshot() {
 }
 
 setup_account() {
-  local detected_id current_id steam_id api_key response friends_response input_id config_json
+  local detected_id current_id steam_id api_key response friends_response input_id config_json privacy_file
   detected_id="$(detect_steam_id 2>/dev/null || true)"
   current_id=""
+  privacy_file="${BASH_SOURCE[0]%/scripts/steam-friends}/PRIVACY.md"
 
   if read_config; then
     current_id="$(jq -r '.steamId // empty' "$CONFIG_FILE" 2>/dev/null || true)"
@@ -493,6 +518,9 @@ setup_account() {
   printf 'This wizard stores your Steam Web API key locally in:\n  %s\n\n' "$CONFIG_FILE"
   printf 'The file is private to your user (mode 0600). The key is never\n'
   printf 'written to Omarchy shell.json or printed by the plugin.\n\n'
+  printf 'Before continuing, review:\n  %s\n' "$privacy_file"
+  printf 'Steam data is locally cached for up to 24 hours and provided as-is.\n'
+  printf 'This independent community project is not affiliated with Valve or Steam.\n\n'
 
   if ! command -v curl >/dev/null 2>&1; then
     printf '\033[1;31mcurl is required but is not installed.\033[0m\n'
