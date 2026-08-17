@@ -2,6 +2,18 @@
 
 All notable changes are documented here. Versions follow semantic versioning.
 
+## 1.0.2 — 2026-08-17
+
+### Changed
+
+- The Steam shortcut and bar-icon secondary action now open Steam's main window.
+- Steam actions close the keyboard panel immediately and surface progress on the bar, allowing native Steam activation to receive focus without a competing layer-shell surface.
+
+### Fixed
+
+- The panel no longer reclaims keyboard focus after a successful Steam handoff.
+- Action failures reopen the panel with an actionable error, while safe duplicate/cold-start suppression leaves focus available for Steam.
+
 ## 1.0.1 — 2026-08-17
 
 ### Added

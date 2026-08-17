@@ -254,9 +254,9 @@ steam_action() {
       [[ "$steam_id" =~ ^[0-9]{17}$ ]] || return 64
       uri="steam://friends/message/${steam_id}"
       ;;
-    friends)
+    main)
       (( $# == 1 )) || return 64
-      uri='steam://open/friends'
+      uri='steam://open/main'
       ;;
     *) return 64 ;;
   esac

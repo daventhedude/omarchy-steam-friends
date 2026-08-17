@@ -29,8 +29,17 @@ contains(panel,
   "steamActionProc.command = [backendPath, \"steam-action\"].concat(actionArguments)",
   "Steam actions must use the validating helper instead of direct URI execution")
 contains(panel,
+  "steamActionProc.running = true\n    // KeyboardPanel releases its layer-shell keyboard ownership",
+  "Steam actions must begin before the panel releases keyboard ownership")
+contains(panel,
+  "[\"main\"]",
+  "The Steam shortcut must request the allowlisted main-window action")
+contains(panel,
   "[\"chat\", String(friend.steamId)]",
   "Chat activation must pass only the validated Steam ID to the helper")
+contains(panel,
+  "if (root.steamActionFailure) {\n        root.controller.show()",
+  "Only actionable Steam launch failures may reclaim the plugin panel")
 contains(panel,
   "sourceComponent: !root.initialized\n          ? loadingView",
   "The first snapshot must have an explicit loading state")
@@ -57,5 +66,8 @@ contains(backend,
 contains(backend,
   "uri=\"steam://friends/message/${steam_id}\"",
   "The helper must reconstruct chat URIs after Steam ID validation")
+contains(backend,
+  "uri='steam://open/main'",
+  "The helper must reconstruct the allowlisted Steam main-window URI")
 
 console.log("UI contracts passed")
