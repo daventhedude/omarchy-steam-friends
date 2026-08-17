@@ -8,6 +8,8 @@ CONFIG_DIR="${CONFIG_ROOT}/omarchy"
 CONFIG_FILE="${CONFIG_DIR}/steam-friends.json"
 CACHE_DIR="${CACHE_ROOT}/omarchy-steam-friends"
 CACHE_FILE="${CACHE_DIR}/snapshot.json"
+ACTION_LOCK_FILE="${CACHE_DIR}/steam-action.lock"
+ACTION_GUARD_FILE="${CACHE_DIR}/steam-action.guard"
 API_ROOT="https://api.steampowered.com/ISteamUser"
 MAX_RESPONSE_BYTES=2097152
 MAX_CACHE_BYTES=8388608
@@ -153,7 +155,7 @@ cache_snapshot() {
   ' "$CACHE_FILE"
 }
 
-write_private_json() {
+write_private_file() {
   local directory="$1"
   local destination="$2"
   local prefix="$3"
@@ -176,6 +178,137 @@ prepare_cache_dir() {
   owned_directory "$CACHE_DIR" || return 1
   chmod 700 -- "$CACHE_DIR" || return 1
   private_directory "$CACHE_DIR"
+}
+
+steam_process_running() {
+  command -v pgrep >/dev/null 2>&1 || return 1
+  pgrep -u "$EUID" -x steam >/dev/null 2>&1
+}
+
+steam_pipe_ready() {
+  local pipe
+  local -a candidates=(
+    "${HOME}/.steam/steam.pipe"
+    "${HOME}/.local/share/Steam/config/steam.pipe"
+    "${HOME}/.var/app/com.valvesoftware.Steam/.steam/steam.pipe"
+  )
+
+  steam_process_running || return 1
+
+  for pipe in "${candidates[@]}"; do
+    [[ -p "$pipe" ]] && return 0
+  done
+  return 1
+}
+
+read_action_guard() {
+  local guard size
+
+  if [[ ! -e "$ACTION_GUARD_FILE" ]]; then
+    printf '%s\n' 0
+    return
+  fi
+
+  private_regular_file "$ACTION_GUARD_FILE" || return 1
+  size="$(stat -c '%s' -- "$ACTION_GUARD_FILE" 2>/dev/null)" || return 1
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  (( size > 0 && size <= 32 )) || return 1
+  IFS= read -r guard <"$ACTION_GUARD_FILE" || return 1
+  [[ "$guard" =~ ^[0-9]{1,12}$ ]] || return 1
+  printf '%s\n' "$guard"
+}
+
+write_action_guard() {
+  local not_before="$1"
+
+  [[ "$not_before" =~ ^[0-9]{1,12}$ ]] || return 1
+  write_private_file \
+    "$CACHE_DIR" "$ACTION_GUARD_FILE" ".steam-action-guard" "$not_before"
+}
+
+acquire_action_lock() {
+  local -n output_fd="$1"
+
+  command -v flock >/dev/null 2>&1 || return 69
+  prepare_cache_dir || return 70
+
+  if [[ ! -e "$ACTION_LOCK_FILE" ]]; then
+    (umask 077; : >"$ACTION_LOCK_FILE") || return 70
+    chmod 600 -- "$ACTION_LOCK_FILE" || return 70
+  fi
+  private_regular_file "$ACTION_LOCK_FILE" || return 70
+
+  exec {output_fd}<>"$ACTION_LOCK_FILE" || return 70
+  private_regular_file "$ACTION_LOCK_FILE" || return 70
+  flock -n "$output_fd" || return 75
+}
+
+steam_action() {
+  local kind="${1:-}"
+  local steam_id="${2:-}"
+  local uri now not_before lock_fd ready_before=false attempt
+
+  case "$kind" in
+    chat)
+      (( $# == 2 )) || return 64
+      [[ "$steam_id" =~ ^[0-9]{17}$ ]] || return 64
+      uri="steam://friends/message/${steam_id}"
+      ;;
+    friends)
+      (( $# == 1 )) || return 64
+      uri='steam://open/friends'
+      ;;
+    *) return 64 ;;
+  esac
+
+  command -v xdg-open >/dev/null 2>&1 || return 69
+  command -v pgrep >/dev/null 2>&1 || return 69
+  acquire_action_lock lock_fd || return $?
+
+  now="$(date +%s)" || return 70
+  [[ "$now" =~ ^[0-9]{1,12}$ ]] || return 70
+  not_before="$(read_action_guard)" || return 70
+  if (( not_before > now + 90 )); then
+    # Recover safely from a large backwards wall-clock jump or corrupted local
+    # timestamp without ever turning that anomaly into an immediate relaunch.
+    write_action_guard "$((now + 45))" || return 70
+    return 75
+  fi
+  (( now >= not_before )) || return 75
+
+  if steam_pipe_ready; then
+    ready_before=true
+    write_action_guard "$((now + 2))" || return 70
+  elif steam_process_running; then
+    # A client that exists but has not created its command pipe is still in a
+    # cold start. Never compete with it, even on a machine that needs longer
+    # than the normal guard window to initialize.
+    write_action_guard "$((now + 15))" || return 70
+    return 75
+  else
+    # A cold Steam start took about 20 seconds in real-world validation. Keep
+    # the guard beyond that window so impatient repeat input cannot launch
+    # competing clients before Steam's command pipe is available.
+    write_action_guard "$((now + 45))" || return 70
+  fi
+
+  if ! xdg-open "$uri" >/dev/null 2>&1; then
+    write_action_guard "$now" >/dev/null 2>&1 || true
+    return 70
+  fi
+
+  [[ "$ready_before" == true ]] && return 0
+
+  for ((attempt = 0; attempt < 90; attempt++)); do
+    if steam_pipe_ready; then
+      now="$(date +%s)" || return 70
+      write_action_guard "$((now + 2))" || return 70
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  return 75
 }
 
 json_error() {
@@ -495,7 +628,7 @@ snapshot() {
   fi
 
   if ! prepare_cache_dir \
-    || ! write_private_json "$CACHE_DIR" "$CACHE_FILE" ".snapshot" "$normalized"; then
+    || ! write_private_file "$CACHE_DIR" "$CACHE_FILE" ".snapshot" "$normalized"; then
     normalized="$(jq -c '.warning = "Presence loaded, but the private cache could not be updated."' <<<"$normalized")"
   fi
   printf '%s\n' "$normalized"
@@ -593,7 +726,7 @@ setup_account() {
   printf '\033[1;32mok\033[0m\n'
 
   printf -v config_json '{"apiKey":"%s","steamId":"%s"}' "$api_key" "$steam_id"
-  if ! write_private_json "$CONFIG_DIR" "$CONFIG_FILE" ".steam-friends" "$config_json"; then
+  if ! write_private_file "$CONFIG_DIR" "$CONFIG_FILE" ".steam-friends" "$config_json"; then
     printf '\n\033[1;31mThe private configuration could not be written safely.\033[0m\n'
     api_key=""
     config_json=""
@@ -661,8 +794,12 @@ case "${1:-snapshot}" in
     fi
     ;;
   demo) demo_snapshot ;;
+  steam-action)
+    shift
+    steam_action "$@"
+    ;;
   *)
-    printf 'Usage: %s [snapshot|setup|demo]\n' "${0##*/}" >&2
+    printf 'Usage: %s [snapshot|setup|demo|steam-action]\n' "${0##*/}" >&2
     exit 64
     ;;
 esac

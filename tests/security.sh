@@ -9,6 +9,8 @@ TEST_CONFIG="${AUDIT_TMP}/config"
 TEST_CACHE="${AUDIT_TMP}/cache"
 TEST_BIN="${AUDIT_TMP}/bin"
 FAKE_CURL_LOG="${AUDIT_TMP}/curl.log"
+FAKE_XDG_LOG="${AUDIT_TMP}/xdg-open.log"
+TEST_ACTION_CACHE="${AUDIT_TMP}/action-cache"
 TEST_KEY="$(printf '0%.0s' {1..32})"
 TEST_SELF_ID="00000000000000000"
 TEST_FRIEND_ONE="00000000000000001"
@@ -68,6 +70,18 @@ run_setup() {
     EXPECTED_SUMMARY_IDS="$TEST_SELF_ID" \
     FAKE_STEAM_MODE=normal \
     "$BACKEND" setup
+}
+
+run_steam_action() {
+  env \
+    HOME="$TEST_HOME" \
+    XDG_CONFIG_HOME="$TEST_CONFIG" \
+    XDG_CACHE_HOME="$TEST_ACTION_CACHE" \
+    PATH="${TEST_BIN}:/usr/bin:/bin" \
+    FAKE_XDG_LOG="$FAKE_XDG_LOG" \
+    FAKE_XDG_MODE="${FAKE_XDG_MODE:-delayed-ready}" \
+    FAKE_PGREP_RUNNING="${FAKE_PGREP_RUNNING:-0}" \
+    "$BACKEND" steam-action "$@"
 }
 
 mkdir -p "$TEST_HOME" "$TEST_BIN"
@@ -143,6 +157,40 @@ fi
 exit 96
 FAKE_CURL
 chmod 700 "${TEST_BIN}/curl"
+
+cat >"${TEST_BIN}/xdg-open" <<'FAKE_XDG_OPEN'
+#!/usr/bin/env bash
+set -euo pipefail
+
+(( $# == 1 )) || exit 90
+printf '%s\n' "$1" >>"$FAKE_XDG_LOG"
+
+case "$FAKE_XDG_MODE" in
+  delayed-ready)
+    (
+      sleep 0.25
+      mkdir -p -- "$HOME/.steam"
+      [[ -e "$HOME/.steam/steam.pipe" ]] || mkfifo "$HOME/.steam/steam.pipe"
+    ) &
+    ;;
+  ready)
+    mkdir -p -- "$HOME/.steam"
+    [[ -e "$HOME/.steam/steam.pipe" ]] || mkfifo "$HOME/.steam/steam.pipe"
+    ;;
+  fail) exit 1 ;;
+  *) exit 91 ;;
+esac
+FAKE_XDG_OPEN
+chmod 700 "${TEST_BIN}/xdg-open"
+
+cat >"${TEST_BIN}/pgrep" <<'FAKE_PGREP'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == *'-x steam'* ]] || exit 1
+[[ "$FAKE_PGREP_RUNNING" == "1" ]] && exit 0
+[[ -p "$HOME/.steam/steam.pipe" ]]
+FAKE_PGREP
+chmod 700 "${TEST_BIN}/pgrep"
 
 # Unconfigured startup is deterministic and does not contact Steam.
 unconfigured="$(run_snapshot)"
@@ -247,6 +295,80 @@ ln "${TEST_CONFIG}/omarchy/steam-friends.json" "${TEST_CONFIG}/omarchy/credentia
 hardlinked_config="$(run_snapshot)"
 assert_jq '.configured == false' "$hardlinked_config"
 unlink "${TEST_CONFIG}/omarchy/credentials-hardlink.json"
+
+# Steam URI actions are validated, serialized, and guarded across helper
+# processes. This is the regression contract for a real cold-start crash where
+# three impatient Enter presses launched competing Steam clients.
+FAKE_XDG_MODE=delayed-ready run_steam_action chat "$TEST_FRIEND_ONE" &
+first_action_pid=$!
+for _ in {1..50}; do
+  [[ -s "$FAKE_XDG_LOG" ]] && break
+  sleep 0.02
+done
+[[ -s "$FAKE_XDG_LOG" ]] || fail 'first Steam action never reached xdg-open'
+
+set +e
+FAKE_XDG_MODE=delayed-ready run_steam_action friends
+parallel_action_status=$?
+set -e
+[[ "$parallel_action_status" == "75" ]] \
+  || fail 'parallel Steam action was not rejected with temporary-failure status'
+wait "$first_action_pid" || fail 'serialized Steam action did not become ready'
+[[ "$(wc -l <"$FAKE_XDG_LOG")" == "1" ]] \
+  || fail 'parallel Steam action reached xdg-open'
+[[ "$(<"$FAKE_XDG_LOG")" == "steam://friends/message/${TEST_FRIEND_ONE}" ]] \
+  || fail 'Steam chat URI was not reconstructed from the validated ID'
+
+set +e
+FAKE_XDG_MODE=ready run_steam_action friends
+guarded_action_status=$?
+FAKE_XDG_MODE=ready run_steam_action chat 'not-a-steam-id'
+invalid_action_status=$?
+set -e
+[[ "$guarded_action_status" == "75" ]] \
+  || fail 'post-start Steam action guard did not reject a duplicate'
+[[ "$invalid_action_status" == "64" ]] \
+  || fail 'invalid Steam action input did not fail closed'
+[[ "$(wc -l <"$FAKE_XDG_LOG")" == "1" ]] \
+  || fail 'guarded or invalid Steam action reached xdg-open'
+[[ "$(stat -c '%a' "$TEST_ACTION_CACHE/omarchy-steam-friends")" == "700" ]] \
+  || fail 'Steam action cache directory mode is not 0700'
+[[ "$(stat -c '%a' "$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.lock")" == "600" ]] \
+  || fail 'Steam action lock mode is not 0600'
+[[ "$(stat -c '%a' "$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard")" == "600" ]] \
+  || fail 'Steam action guard mode is not 0600'
+if rg -q --fixed-strings "$TEST_FRIEND_ONE" "$TEST_ACTION_CACHE/omarchy-steam-friends"; then
+  fail 'Steam action guard persisted a friend ID'
+fi
+
+future_guard="$(( $(date +%s) + 3600 ))"
+printf '%s\n' "$future_guard" \
+  >"$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
+chmod 600 "$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
+set +e
+FAKE_XDG_MODE=ready run_steam_action friends
+future_guard_status=$?
+set -e
+[[ "$future_guard_status" == "75" ]] \
+  || fail 'implausible future action guard did not fail safely'
+recovered_guard="$(<"$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard")"
+now_epoch="$(date +%s)"
+(( recovered_guard >= now_epoch && recovered_guard <= now_epoch + 46 )) \
+  || fail 'implausible future action guard did not recover to a bounded delay'
+[[ "$(wc -l <"$FAKE_XDG_LOG")" == "1" ]] \
+  || fail 'future timestamp recovery reached xdg-open'
+
+unlink "$TEST_HOME/.steam/steam.pipe"
+printf '%s\n' 0 >"$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
+chmod 600 "$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
+set +e
+FAKE_PGREP_RUNNING=1 FAKE_XDG_MODE=ready run_steam_action friends
+slow_start_status=$?
+set -e
+[[ "$slow_start_status" == "75" ]] \
+  || fail 'live Steam process without a command pipe was not treated as starting'
+[[ "$(wc -l <"$FAKE_XDG_LOG")" == "1" ]] \
+  || fail 'slow Steam startup launched a competing client'
 
 # A symlinked config parent cannot redirect credential reads.
 mv "${TEST_CONFIG}/omarchy" "${TEST_CONFIG}/omarchy-target"

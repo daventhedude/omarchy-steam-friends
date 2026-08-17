@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability privately
+    url: https://github.com/daventhedude/omarchy-steam-friends/security/advisories/new
+    about: Do not disclose credentials, private snapshots, or exploitable details in a public issue.
+  - name: Read the privacy notice
+    url: https://github.com/daventhedude/omarchy-steam-friends/blob/main/PRIVACY.md
+    about: Review local data use, storage, removal, and the Steam data disclaimer.

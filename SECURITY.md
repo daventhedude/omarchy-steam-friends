@@ -24,6 +24,8 @@ The plugin has no telemetry and does not operate a third-party server.
 - The credential-handling helper fails closed unless it can set its process core-dump limit to zero before reading the API key.
 - Cached presence is schema-validated, stripped of unknown fields, and expires after 24 hours.
 - Caches are bound to the configured Steam ID. A valid snapshot no older than 60 seconds is reused before networking, bounding automatic API traffic.
+- Steam chat/Friends actions are reconstructed from an allowlisted action and, for chat, a validated 17-digit Steam ID. A private per-user `flock` plus a timestamp-only cold-start guard prevents concurrent Steam clients even across repeated input or a shell reload.
+- Steam readiness requires both a live user-owned `steam` process and a known local Steam command pipe; a stale FIFO alone is insufficient.
 - External programs are started with argument arrays. The plugin does not evaluate shell text, request privileges, or run installation hooks.
 
 ## Scope and limitations
@@ -40,6 +42,7 @@ The separate [Privacy and Steam Data Notice](PRIVACY.md) documents every retaine
 
 - Credentials: `~/.config/omarchy/steam-friends.json`
 - Presence cache: `~/.cache/omarchy-steam-friends/`
+- Steam action lock/guard: `~/.cache/omarchy-steam-friends/steam-action.{lock,guard}` (private synchronization metadata only; no Steam IDs)
 
 Removing the plugin leaves both locations intact so an update or reinstall does not unexpectedly destroy user data. The README documents the explicit cleanup command. A Steam key can be revoked from the user's Steam Web API key page at any time.
 

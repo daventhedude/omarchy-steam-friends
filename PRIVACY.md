@@ -20,7 +20,7 @@ The data is used only to render the panel, search it locally, open a profile or 
 
 ## Local storage and country
 
-Your API key and Steam ID are stored in `~/.config/omarchy/steam-friends.json` until you delete them. A normalized, key-free presence snapshot is stored in `~/.cache/omarchy-steam-friends/snapshot.json`. That file remains until it is replaced or you delete it; once it is more than 24 hours old, the plugin rejects it instead of displaying it. While Omarchy is running, its QML image engine may also retain decoded avatars in its in-process image cache.
+Your API key and Steam ID are stored in `~/.config/omarchy/steam-friends.json` until you delete them. A normalized, key-free presence snapshot is stored in `~/.cache/omarchy-steam-friends/snapshot.json`. That file remains until it is replaced or you delete it; once it is more than 24 hours old, the plugin rejects it instead of displaying it. The same private cache directory contains a lock file and a numeric timestamp used only to serialize Steam startup actions; neither contains a Steam ID or action history. While Omarchy is running, its QML image engine may also retain decoded avatars in its in-process image cache.
 
 Both files remain solely on the computer where you install the plugin. They are therefore stored in the country where you physically locate that computer; the project does not choose, know, or transfer them to a developer-controlled storage country. You are responsible for choosing a device location permitted by your obligations and the Steam Web API Terms.
 

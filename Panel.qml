@@ -67,6 +67,7 @@ Panel {
   property var snapshot: Model.emptySnapshot()
   property bool loading: true
   property bool receivedOutput: false
+  property bool initialized: false
   property string activeFilter: "online"
   property string searchText: ""
   property int selectedIndex: 0
@@ -75,6 +76,11 @@ Panel {
   property int setupPollCount: 0
   property var searchFieldItem: null
   property var friendsListItem: null
+  property string steamActionMessage: ""
+  property string steamActionSuccessMessage: ""
+  property bool steamActionFailure: false
+
+  readonly property bool steamActionPending: steamActionProc.running
 
   readonly property bool configured: snapshot.configured === true
   readonly property int onlineCount: Model.safeCount(snapshot, "online")
@@ -127,12 +133,22 @@ Panel {
     snapshot = parsed
     loading = false
     receivedOutput = true
+    initialized = true
     if (configured) {
       setupStarted = false
       setupPoll.stop()
     }
     clampSelection()
+    restorePanelFocus()
     return true
+  }
+
+  function restorePanelFocus() {
+    if (!opened || (searchFieldItem && searchFieldItem.activeFocus)) return
+    Qt.callLater(function() {
+      if (root.opened && (!root.searchFieldItem || !root.searchFieldItem.activeFocus))
+        keyCatcher.forceActiveFocus()
+    })
   }
 
   function clampSelection() {
@@ -163,16 +179,51 @@ Panel {
     messageFriend(visibleFriends[selectedIndex])
   }
 
+  function activateCurrent() {
+    if (!initialized) return
+    if (!configured) {
+      if (!setupStarted) beginSetup()
+      return
+    }
+    if (!snapshot.ok) {
+      refresh()
+      return
+    }
+    activateSelected()
+  }
+
+  function launchSteamAction(actionArguments, pendingMessage, successMessage) {
+    if (steamActionProc.running) {
+      steamActionMessage = "Steam is already opening — duplicate action blocked."
+      steamActionFailure = false
+      return false
+    }
+
+    actionFeedbackTimer.stop()
+    steamActionMessage = pendingMessage
+    steamActionSuccessMessage = successMessage
+    steamActionFailure = false
+    steamActionProc.command = [backendPath, "steam-action"].concat(actionArguments)
+    steamActionProc.running = true
+    return true
+  }
+
   function openFriends() {
-    Quickshell.execDetached(["xdg-open", "steam://open/friends"])
+    return launchSteamAction(
+      ["friends"],
+      "Opening Steam Friends… Steam may take a moment to start.",
+      "Steam Friends opened."
+    )
   }
 
   function messageFriend(friend) {
-    if (!friend || !Model.isSteamId(friend.steamId)) return
-    Quickshell.execDetached([
-      "xdg-open",
-      "steam://friends/message/" + String(friend.steamId)
-    ])
+    if (!friend || !Model.isSteamId(friend.steamId)) return false
+    var displayName = String(friend.name || "friend")
+    return launchSteamAction(
+      ["chat", String(friend.steamId)],
+      "Opening chat with " + displayName + "… Steam may take a moment to start.",
+      "Chat sent to Steam."
+    )
   }
 
   function openProfile(friend) {
@@ -207,6 +258,7 @@ Panel {
       nowMs = Date.now()
       selectedIndex = 0
       refresh()
+      restorePanelFocus()
     } else {
       searchText = ""
     }
@@ -219,6 +271,15 @@ Panel {
     running: true
     repeat: true
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    id: actionFeedbackTimer
+    interval: 3500
+    repeat: false
+    onTriggered: {
+      if (!root.steamActionPending) root.steamActionMessage = ""
+    }
   }
 
   Timer {
@@ -253,6 +314,7 @@ Panel {
     onExited: function(exitCode) {
       if (!root.receivedOutput) {
         root.loading = false
+        root.initialized = true
         root.snapshot = {
           ok: false,
           configured: root.configured,
@@ -265,6 +327,29 @@ Panel {
           counts: { total: 0, online: 0, inGame: 0 }
         }
       }
+      root.restorePanelFocus()
+    }
+  }
+
+  Process {
+    id: steamActionProc
+
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.steamActionMessage = root.steamActionSuccessMessage
+        root.steamActionFailure = false
+      } else if (exitCode === 75) {
+        root.steamActionMessage = "Steam is still starting — duplicate action blocked safely."
+        root.steamActionFailure = false
+      } else if (exitCode === 69) {
+        root.steamActionMessage = "Steam could not be opened because a required system command is missing."
+        root.steamActionFailure = true
+      } else {
+        root.steamActionMessage = "Steam could not be opened. Try again after checking the Steam installation."
+        root.steamActionFailure = true
+      }
+      actionFeedbackTimer.restart()
+      root.restorePanelFocus()
     }
   }
 
@@ -285,16 +370,57 @@ Panel {
       onMoveRequested: function(dx, dy) {
         if (dy !== 0) root.moveSelection(dy)
       }
-      onActivateRequested: root.activateSelected()
+      onActivateRequested: root.activateCurrent()
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) { root.handleShortcut(text) }
 
       Loader {
         anchors.fill: parent
-        sourceComponent: !root.configured
+        sourceComponent: !root.initialized
+          ? loadingView
+          : (!root.configured
           ? setupView
-          : (root.snapshot.ok ? friendsView : errorView)
+          : (root.snapshot.ok ? friendsView : errorView))
+      }
+    }
+  }
+
+  Component {
+    id: loadingView
+
+    Item {
+      ColumnLayout {
+        anchors.centerIn: parent
+        width: Math.min(parent.width, Style.space(320))
+        spacing: Style.space(10)
+
+        Text {
+          Layout.alignment: Qt.AlignHCenter
+          text: ""
+          color: root.accentText
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.displayLarge
+        }
+
+        Text {
+          Layout.fillWidth: true
+          text: "Loading Steam presence…"
+          color: root.contentForeground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.title
+          font.bold: true
+          horizontalAlignment: Text.AlignHCenter
+        }
+
+        Text {
+          Layout.fillWidth: true
+          text: "The first secure refresh can take a few seconds."
+          color: root.secondaryText
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          horizontalAlignment: Text.AlignHCenter
+        }
       }
     }
   }
@@ -572,6 +698,7 @@ Panel {
       Component.onCompleted: {
         root.searchFieldItem = searchField
         root.friendsListItem = friendsList
+        root.restorePanelFocus()
       }
       Component.onDestruction: {
         if (root.searchFieldItem === searchField) root.searchFieldItem = null
@@ -691,6 +818,7 @@ Panel {
               foreground: root.contentForeground
               hoverColor: root.accentGraphic
               fontFamily: root.fontFamily
+              enabled: !root.steamActionPending
               onClicked: root.openFriends()
             }
           }
@@ -749,6 +877,36 @@ Panel {
           }
         }
 
+        BorderSurface {
+          visible: root.steamActionMessage !== ""
+          Layout.fillWidth: true
+          Layout.preferredHeight: actionMessageText.implicitHeight + Style.space(12)
+          radius: Style.cornerRadius
+          color: Style.normalFillFor(
+            root.steamActionFailure ? root.urgentGraphic : root.accentGraphic,
+            root.steamActionFailure ? root.urgentGraphic : root.accentGraphic)
+          borderSpec: Border.controlSpec(
+            "normal",
+            root.steamActionFailure ? root.urgentGraphic : root.accentGraphic,
+            root.steamActionFailure ? root.urgentGraphic : root.accentGraphic)
+
+          Text {
+            id: actionMessageText
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: Style.space(10)
+            anchors.rightMargin: Style.space(10)
+            anchors.verticalCenter: parent.verticalCenter
+            text: (root.steamActionPending ? "󰔟  " : (root.steamActionFailure ? "󰅙  " : "󰄬  "))
+              + root.steamActionMessage
+            textFormat: Text.PlainText
+            color: root.steamActionFailure ? root.urgentText : root.accentText
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+        }
+
         RowLayout {
           Layout.fillWidth: true
           spacing: Style.space(6)
@@ -791,15 +949,14 @@ Panel {
             root.selectedIndex = 0
           }
           onAccepted: {
+            root.activateCurrent()
             focus = false
-            keyCatcher.forceActiveFocus()
+            root.restorePanelFocus()
           }
           Keys.onEscapePressed: function(event) {
-            if (text !== "") text = ""
-            else {
-              focus = false
-              keyCatcher.forceActiveFocus()
-            }
+            text = ""
+            focus = false
+            root.restorePanelFocus()
             event.accepted = true
           }
         }
@@ -831,6 +988,7 @@ Panel {
               presenceTextPalette: root.presenceTextPalette
               fontFamily: root.fontFamily
               nowMs: root.nowMs
+              enabled: !root.steamActionPending
               onHoveredRow: root.selectedIndex = index
               onActivated: root.messageFriend(modelData)
               onProfileRequested: root.openProfile(modelData)
@@ -891,7 +1049,9 @@ Panel {
 
           Text {
             Layout.fillWidth: true
-            text: "ENTER CHAT  ·  RIGHT-CLICK PROFILE"
+            text: root.steamActionPending
+              ? "OPENING STEAM  ·  DUPLICATE INPUT LOCKED"
+              : "ENTER CHAT  ·  RIGHT-CLICK PROFILE"
             color: root.quietText
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
