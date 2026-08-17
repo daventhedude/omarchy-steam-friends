@@ -36,3 +36,7 @@ Use `"_demoMode": true` only in your local widget settings for visual testing. R
 ## Pull requests
 
 Keep each pull request scoped to one coherent change. Explain user impact and every trust-boundary change, update the relevant documentation, and add a regression test. Public bug reports and pull requests must not contain credentials or private Steam data; use GitHub private vulnerability reporting for exploitable findings.
+
+## Releases
+
+The manifest version and release tag must match exactly (`1.2.3` and `v1.2.3`). Publish the GitHub release only from a reviewed commit on `main`. The tag-triggered release workflow verifies both constraints and reruns the portable security contracts in a read-only job. A separate publish job then builds a Git archive with a versioned root directory and uploads both the archive and its SHA-256 checksum. Only that final job has `contents: write`; checkout credentials are never persisted, and `GH_TOKEN` is exported only for the upload step.
