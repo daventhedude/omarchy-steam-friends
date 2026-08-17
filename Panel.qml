@@ -954,11 +954,9 @@ Panel {
             root.restorePanelFocus()
           }
           Keys.onEscapePressed: function(event) {
-            if (text !== "") text = ""
-            else {
-              focus = false
-              root.restorePanelFocus()
-            }
+            text = ""
+            focus = false
+            root.restorePanelFocus()
             event.accepted = true
           }
         }

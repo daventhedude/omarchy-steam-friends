@@ -20,6 +20,9 @@ contains(panel,
   "onAccepted: {\n            root.activateCurrent()",
   "Search Enter must activate the selected result before restoring panel focus")
 contains(panel,
+  "Keys.onEscapePressed: function(event) {\n            text = \"\"\n            focus = false\n            root.restorePanelFocus()",
+  "Search Escape must clear the query and return keyboard control in one step")
+contains(panel,
   "if (steamActionProc.running)",
   "QML must reject duplicate Steam actions while the helper is active")
 contains(panel,

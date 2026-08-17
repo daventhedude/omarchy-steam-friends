@@ -15,6 +15,7 @@ All notable changes are documented here. Versions follow semantic versioning.
 
 - Initial loading, Steam startup, completion, and failure states now provide immediate theme-native feedback.
 - Panel focus is restored after asynchronous refreshes and Enter in search activates the selected match consistently.
+- Escape now clears and exits search in one step before the next Escape closes the panel.
 
 ### Fixed
 
