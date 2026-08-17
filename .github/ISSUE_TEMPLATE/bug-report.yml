@@ -74,4 +74,3 @@ body:
       options:
         - label: I verified that this report contains no API key or private Steam data.
           required: true
-
