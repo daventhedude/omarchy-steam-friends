@@ -1,5 +1,7 @@
 # Steam Friends for Omarchy
 
+[![CI](https://github.com/daventhedude/omarchy-steam-friends/actions/workflows/ci.yml/badge.svg)](https://github.com/daventhedude/omarchy-steam-friends/actions/workflows/ci.yml)
+
 A native, theme-aware Steam friends panel for the Omarchy Quattro bar. It keeps the people and games you care about one click away without embedding a browser or running another Quickshell process.
 
 ![Steam Friends panel](preview.png)
@@ -93,6 +95,8 @@ See [PRIVACY.md](PRIVACY.md) for the data-use, local-storage, Steam-data disclai
 As with every Omarchy shell plugin, the code runs with your user permissions. Review the small helper script before installing if you would like to verify the complete data path.
 
 ## Development
+
+Contribution and trust-boundary rules are documented in [CONTRIBUTING.md](CONTRIBUTING.md). Release history is recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ```bash
 omarchy plugin validate .

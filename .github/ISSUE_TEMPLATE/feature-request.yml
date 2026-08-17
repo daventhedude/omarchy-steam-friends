@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a focused improvement that fits the local-first security model.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed experience
+      description: Describe the interaction and how it should adapt to Omarchy themes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy impact
+      description: Note any new network destination, stored field, executable, permission, or URI action. Write "None" if there is no change.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This request does not require sharing an API key or private Steam data.
+          required: true
+
