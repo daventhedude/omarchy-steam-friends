@@ -68,18 +68,19 @@ gio trash ~/.config/omarchy/steam-friends.json ~/.cache/omarchy-steam-friends
 | --- | --- |
 | Left-click bar icon | Toggle the panel |
 | Middle-click bar icon | Refresh presence |
-| Right-click bar icon | Open Steam Friends |
+| Right-click bar icon | Open Steam main window |
 | `j` / `k` or arrows | Select a friend |
 | Enter or left-click | Open Steam chat |
 | Right-click a friend | Open Steam profile |
 | `/` | Focus search |
 | `r` | Refresh |
-| `s` | Open Steam Friends |
+| `s` | Open Steam main window |
 | Escape | Close search/panel |
 
-When Steam is not already running, the first chat can take several seconds to
-appear. The panel shows that startup immediately and safely ignores duplicate
-actions until Steam's local command pipe is ready.
+When Steam is not already running, the first action can take several seconds.
+The panel releases keyboard focus immediately, the bar shows startup progress,
+and duplicate actions are ignored safely until Steam's local command pipe is
+ready.
 
 ## Settings
 

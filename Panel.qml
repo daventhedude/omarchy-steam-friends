@@ -205,14 +205,18 @@ Panel {
     steamActionFailure = false
     steamActionProc.command = [backendPath, "steam-action"].concat(actionArguments)
     steamActionProc.running = true
+    // KeyboardPanel releases its layer-shell keyboard ownership as soon as
+    // the logical panel closes. Let Steam's URI activation choose and focus
+    // the intended Steam window instead of competing with it from the bar.
+    close()
     return true
   }
 
-  function openFriends() {
+  function openSteam() {
     return launchSteamAction(
-      ["friends"],
-      "Opening Steam Friends… Steam may take a moment to start.",
-      "Steam Friends opened."
+      ["main"],
+      "Opening Steam… Steam may take a moment to start.",
+      "Steam opened."
     )
   }
 
@@ -243,7 +247,7 @@ Panel {
 
   function handleShortcut(text) {
     if (text === "r" || text === "R") refresh()
-    else if (text === "s" || text === "S") openFriends()
+    else if (text === "s" || text === "S") openSteam()
     else if (text === "/" && searchFieldItem) {
       searchFieldItem.forceActiveFocus()
       searchFieldItem.selectAll()
@@ -349,7 +353,12 @@ Panel {
         root.steamActionFailure = true
       }
       actionFeedbackTimer.restart()
-      root.restorePanelFocus()
+      // Successful and already-running handoffs stay closed so Steam keeps
+      // focus. Reopen only when there is an actionable launch failure.
+      if (root.steamActionFailure) {
+        root.controller.show()
+        root.restorePanelFocus()
+      }
     }
   }
 
@@ -814,12 +823,12 @@ Panel {
 
             PanelActionButton {
               iconText: "󰍉"
-              tooltipText: "Open Steam Friends · s"
+              tooltipText: "Open Steam · s"
               foreground: root.contentForeground
               hoverColor: root.accentGraphic
               fontFamily: root.fontFamily
               enabled: !root.steamActionPending
-              onClicked: root.openFriends()
+              onClicked: root.openSteam()
             }
           }
 

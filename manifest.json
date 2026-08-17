@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.daventhedude.steam-friends",
   "name": "Steam Friends",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Daven Niemann",
   "license": "MIT",
   "description": "A polished Steam friends presence panel for the Omarchy bar, with live game activity, avatars, search, and native Steam actions.",

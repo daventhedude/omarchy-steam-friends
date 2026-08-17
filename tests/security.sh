@@ -308,7 +308,7 @@ done
 [[ -s "$FAKE_XDG_LOG" ]] || fail 'first Steam action never reached xdg-open'
 
 set +e
-FAKE_XDG_MODE=delayed-ready run_steam_action friends
+FAKE_XDG_MODE=delayed-ready run_steam_action main
 parallel_action_status=$?
 set -e
 [[ "$parallel_action_status" == "75" ]] \
@@ -320,15 +320,19 @@ wait "$first_action_pid" || fail 'serialized Steam action did not become ready'
   || fail 'Steam chat URI was not reconstructed from the validated ID'
 
 set +e
-FAKE_XDG_MODE=ready run_steam_action friends
+FAKE_XDG_MODE=ready run_steam_action main
 guarded_action_status=$?
 FAKE_XDG_MODE=ready run_steam_action chat 'not-a-steam-id'
 invalid_action_status=$?
+FAKE_XDG_MODE=ready run_steam_action friends
+obsolete_action_status=$?
 set -e
 [[ "$guarded_action_status" == "75" ]] \
   || fail 'post-start Steam action guard did not reject a duplicate'
 [[ "$invalid_action_status" == "64" ]] \
   || fail 'invalid Steam action input did not fail closed'
+[[ "$obsolete_action_status" == "64" ]] \
+  || fail 'non-allowlisted Steam action kind did not fail closed'
 [[ "$(wc -l <"$FAKE_XDG_LOG")" == "1" ]] \
   || fail 'guarded or invalid Steam action reached xdg-open'
 [[ "$(stat -c '%a' "$TEST_ACTION_CACHE/omarchy-steam-friends")" == "700" ]] \
@@ -346,7 +350,7 @@ printf '%s\n' "$future_guard" \
   >"$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
 chmod 600 "$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
 set +e
-FAKE_XDG_MODE=ready run_steam_action friends
+FAKE_XDG_MODE=ready run_steam_action main
 future_guard_status=$?
 set -e
 [[ "$future_guard_status" == "75" ]] \
@@ -362,13 +366,22 @@ unlink "$TEST_HOME/.steam/steam.pipe"
 printf '%s\n' 0 >"$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
 chmod 600 "$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
 set +e
-FAKE_PGREP_RUNNING=1 FAKE_XDG_MODE=ready run_steam_action friends
+FAKE_PGREP_RUNNING=1 FAKE_XDG_MODE=ready run_steam_action main
 slow_start_status=$?
 set -e
 [[ "$slow_start_status" == "75" ]] \
   || fail 'live Steam process without a command pipe was not treated as starting'
 [[ "$(wc -l <"$FAKE_XDG_LOG")" == "1" ]] \
   || fail 'slow Steam startup launched a competing client'
+
+# The allowlisted main-window action is reconstructed internally and reaches
+# xdg-open only after the same private serialization boundary as chat actions.
+printf '%s\n' 0 >"$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
+chmod 600 "$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
+FAKE_XDG_MODE=ready run_steam_action main \
+  || fail 'Steam main-window action did not complete'
+[[ "$(tail -n 1 "$FAKE_XDG_LOG")" == "steam://open/main" ]] \
+  || fail 'Steam main-window URI was not reconstructed from the allowlisted action'
 
 # A symlinked config parent cannot redirect credential reads.
 mv "${TEST_CONFIG}/omarchy" "${TEST_CONFIG}/omarchy-target"

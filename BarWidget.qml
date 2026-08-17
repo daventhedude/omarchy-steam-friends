@@ -23,6 +23,9 @@ BarWidget {
   readonly property bool configured: panelLoader.item
     ? panelLoader.item.configured
     : false
+  readonly property bool steamActionPending: panelLoader.item
+    ? panelLoader.item.steamActionPending === true
+    : false
   readonly property color badgeColor: root.inGameCount > 0
     ? Color.accent
     : (root.bar ? root.bar.barForeground : Color.bar.text)
@@ -84,7 +87,7 @@ BarWidget {
       Text {
         anchors.centerIn: parent
         text: ""
-        color: root.opened
+        color: root.opened || root.steamActionPending
           ? (root.bar ? root.bar.urgent : Color.urgent)
           : (root.bar ? root.bar.barForeground : Color.foreground)
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -92,6 +95,14 @@ BarWidget {
         renderType: Text.NativeRendering
 
         Behavior on color { ColorAnimation { duration: 160 } }
+
+        SequentialAnimation on opacity {
+          running: root.steamActionPending
+          loops: Animation.Infinite
+          alwaysRunToEnd: true
+          NumberAnimation { to: 0.45; duration: 420; easing.type: Easing.InOutSine }
+          NumberAnimation { to: 1.0; duration: 420; easing.type: Easing.InOutSine }
+        }
       }
 
       Rectangle {
@@ -126,14 +137,16 @@ BarWidget {
     bar: root.bar
     iconComponent: steamBarIcon
     active: root.opened
-    tooltipText: !root.configured
+    tooltipText: root.steamActionPending
+      ? "Opening Steam…"
+      : (!root.configured
       ? "Set up Steam Friends"
       : (root.inGameCount > 0
         ? root.inGameCount + " playing · " + root.onlineCount + " online"
-        : root.onlineCount + " friends online")
+        : root.onlineCount + " friends online"))
 
     onPressed: function(mouseButton) {
-      if (mouseButton === Qt.RightButton && panelLoader.item) panelLoader.item.openFriends()
+      if (mouseButton === Qt.RightButton && panelLoader.item) panelLoader.item.openSteam()
       else if (mouseButton === Qt.MiddleButton) root.refresh()
       else root.toggle()
     }
