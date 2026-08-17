@@ -18,6 +18,7 @@ Run the portable contracts everywhere:
 bash -n scripts/steam-friends tests/security.sh
 ./tests/security.sh
 ./tests/model-contract.mjs
+./tests/ui-contract.mjs
 ./scripts/steam-friends demo | jq .
 ```
 
@@ -25,6 +26,7 @@ On an Omarchy system, also run the native gates:
 
 ```bash
 ./tests/theme-contract.mjs
+QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/tst_keyboard.qml
 omarchy plugin validate .
 qmllint -I /usr/share/omarchy/shell BarWidget.qml Panel.qml components/*.qml
 ```
@@ -34,4 +36,3 @@ Use `"_demoMode": true` only in your local widget settings for visual testing. R
 ## Pull requests
 
 Keep each pull request scoped to one coherent change. Explain user impact and every trust-boundary change, update the relevant documentation, and add a regression test. Public bug reports and pull requests must not contain credentials or private Steam data; use GitHub private vulnerability reporting for exploitable findings.
-

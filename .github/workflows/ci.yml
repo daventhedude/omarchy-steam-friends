@@ -41,6 +41,7 @@ jobs:
           bash -n scripts/steam-friends tests/security.sh
           node --check tests/model-contract.mjs
           node --check tests/theme-contract.mjs
+          node --check tests/ui-contract.mjs
           jq -e . manifest.json >/dev/null
           git diff-tree --check --no-commit-id --root -r HEAD
 
@@ -49,6 +50,9 @@ jobs:
 
       - name: Run QML model contract
         run: ./tests/model-contract.mjs
+
+      - name: Run UI wiring contract
+        run: ./tests/ui-contract.mjs
 
       - name: Validate deterministic demo data
         run: ./scripts/steam-friends demo | jq -e '.ok and .configured and (.friends | length == 5)' >/dev/null

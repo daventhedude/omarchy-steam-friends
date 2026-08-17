@@ -12,6 +12,7 @@ A native, theme-aware Steam friends panel for the Omarchy Quattro bar. It keeps 
 - Steam avatars, presence states, current games, and last-seen times
 - In-game, online, and all-friends filters plus instant search
 - Click a friend to open Steam chat; right-click to open their profile
+- Cold Steam starts are serialized with immediate in-panel feedback, so repeat clicks or Enter presses cannot launch competing clients
 - Native keyboard flow: `j`/`k`, arrows, Enter, `/`, `r`, `s`, and Escape
 - Runtime theme synthesis across Omarchy's dark, light, monochrome, and custom palettes
 - Contrast-safe semantic text and status colors instead of fixed Steam-blue UI colors
@@ -27,7 +28,7 @@ A native, theme-aware Steam friends panel for the Omarchy Quattro bar. It keeps 
 - Omarchy Quattro
 - A Steam account with a public friends list
 - A free [Steam Web API key](https://steamcommunity.com/dev/apikey)
-- `curl` and `jq` (both are part of a standard Omarchy installation)
+- `curl`, `jq`, `flock`, `pgrep`, and `xdg-open` (all are part of a standard Omarchy installation)
 
 Steam itself does not need to be running for presence to refresh. Steam is opened only when you choose a native action such as chat or Friends.
 
@@ -76,6 +77,10 @@ gio trash ~/.config/omarchy/steam-friends.json ~/.cache/omarchy-steam-friends
 | `s` | Open Steam Friends |
 | Escape | Close search/panel |
 
+When Steam is not already running, the first chat can take several seconds to
+appear. The panel shows that startup immediately and safely ignores duplicate
+actions until Steam's local command pipe is ready.
+
 ## Settings
 
 Open **Omarchy → Setup → Bar** and edit Steam Friends to change:
@@ -90,6 +95,11 @@ The helper talks only to Valve's official HTTPS Web API endpoint. It sends the u
 
 Steam IDs and every response field are validated and length-bounded before entering QML. Profile URLs are reconstructed from validated IDs; avatars are limited to HTTPS Steam CDN hosts; dynamic text is rendered as plain text. The last valid snapshot is stored in a `0700` cache directory as a `0600` file and is accepted for at most 24 hours. A fresh account-bound snapshot is reused for 60 seconds, keeping automatic API traffic below Valve's daily limit even at the supported collection boundary.
 
+Native Steam actions cross a second validation boundary in the helper. A
+per-user file lock and timestamp-only startup guard serialize chat/Friends URI
+dispatch across keyboard, pointer, bar, and helper processes. The guard never
+stores a friend's Steam ID.
+
 See [PRIVACY.md](PRIVACY.md) for the data-use, local-storage, Steam-data disclaimer, and non-affiliation notice. See [SECURITY.md](SECURITY.md) for the complete trust model and vulnerability-reporting process.
 
 As with every Omarchy shell plugin, the code runs with your user permissions. Review the small helper script before installing if you would like to verify the complete data path.
@@ -103,7 +113,9 @@ omarchy plugin validate .
 ./scripts/steam-friends demo | jq .
 ./tests/security.sh
 ./tests/model-contract.mjs
+./tests/ui-contract.mjs
 ./tests/theme-contract.mjs
+QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/tst_keyboard.qml
 ```
 
 For a visual fixture without Steam credentials, add `"_demoMode": true` to the widget's local `shell.json` entry while developing. This setting is intentionally not exposed in the public settings form.

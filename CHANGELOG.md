@@ -9,10 +9,17 @@ All notable changes are documented here. Versions follow semantic versioning.
 - Read-only GitHub CI for portable syntax, security, model, manifest, whitespace, and demo-data contracts.
 - Privacy-safe issue forms, a trust-boundary pull-request checklist, and contribution guidance.
 - Reproducible release archive and checksum publication.
+- Native Qt 6 keyboard-event and portable UI-wiring contracts.
 
 ### Changed
 
-- Repository hardening and maintainer workflow only; plugin runtime behavior and data handling are unchanged from 1.0.0.
+- Initial loading, Steam startup, completion, and failure states now provide immediate theme-native feedback.
+- Panel focus is restored after asynchronous refreshes and Enter in search activates the selected match consistently.
+
+### Fixed
+
+- Steam URI actions are serialized in both QML and the helper, preventing repeated Enter/click input from launching competing Steam clients during a cold start.
+- Steam readiness now requires a live process and command pipe, while private timestamp-only guard state survives a shell reload without retaining friend IDs.
 
 ## 1.0.0 — 2026-08-17
 
@@ -22,4 +29,3 @@ All notable changes are documented here. Versions follow semantic versioning.
 - Live presence, game activity, search, native Steam actions, and the data-driven Presence Orbit.
 - Secure local Web API setup, strict response normalization, account-bound cache, and dual shell/QML validation.
 - Contracts covering security boundaries, the QML model, 5,000-friend batching, and all installed Omarchy themes.
-
