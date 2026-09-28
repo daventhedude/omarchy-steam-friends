@@ -80,6 +80,7 @@ run_steam_action() {
     PATH="${TEST_BIN}:/usr/bin:/bin" \
     FAKE_XDG_LOG="$FAKE_XDG_LOG" \
     FAKE_XDG_MODE="${FAKE_XDG_MODE:-delayed-ready}" \
+    FAKE_STEAM_PID_FILE="${AUDIT_TMP}/fake-steam.pid" \
     FAKE_PGREP_RUNNING="${FAKE_PGREP_RUNNING:-0}" \
     "$BACKEND" steam-action "$@"
 }
@@ -176,6 +177,14 @@ case "$FAKE_XDG_MODE" in
   ready)
     mkdir -p -- "$HOME/.steam"
     [[ -e "$HOME/.steam/steam.pipe" ]] || mkfifo "$HOME/.steam/steam.pipe"
+    ;;
+  long-lived)
+    # A cold xdg-open launch leaves Steam running long after the action ends,
+    # holding every file descriptor it inherited.
+    mkdir -p -- "$HOME/.steam"
+    [[ -e "$HOME/.steam/steam.pipe" ]] || mkfifo "$HOME/.steam/steam.pipe"
+    sleep 30 >/dev/null 2>&1 </dev/null &
+    printf '%s\n' "$!" >"$FAKE_STEAM_PID_FILE"
     ;;
   fail) exit 1 ;;
   *) exit 91 ;;
@@ -382,6 +391,26 @@ FAKE_XDG_MODE=ready run_steam_action main \
   || fail 'Steam main-window action did not complete'
 [[ "$(tail -n 1 "$FAKE_XDG_LOG")" == "steam://open/main" ]] \
   || fail 'Steam main-window URI was not reconstructed from the allowlisted action'
+
+# The serialization lock must not leak into the Steam client that xdg-open
+# starts. A leaked descriptor keeps the lock held for Steam's whole lifetime,
+# silently rejecting every later chat action with the temporary-failure status.
+printf '%s\n' 0 >"$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
+chmod 600 "$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
+FAKE_XDG_MODE=long-lived run_steam_action main \
+  || fail 'long-lived Steam launch did not complete'
+fake_steam_pid="$(<"${AUDIT_TMP}/fake-steam.pid")"
+printf '%s\n' 0 >"$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
+chmod 600 "$TEST_ACTION_CACHE/omarchy-steam-friends/steam-action.guard"
+set +e
+FAKE_PGREP_RUNNING=1 FAKE_XDG_MODE=ready run_steam_action chat "$TEST_FRIEND_ONE"
+after_launch_status=$?
+set -e
+kill "$fake_steam_pid" 2>/dev/null || true
+[[ "$after_launch_status" == "0" ]] \
+  || fail 'Steam client inherited the action lock and blocked a later chat'
+[[ "$(tail -n 1 "$FAKE_XDG_LOG")" == "steam://friends/message/${TEST_FRIEND_ONE}" ]] \
+  || fail 'chat after a long-lived Steam launch never reached xdg-open'
 
 # A symlinked config parent cannot redirect credential reads.
 mv "${TEST_CONFIG}/omarchy" "${TEST_CONFIG}/omarchy-target"
