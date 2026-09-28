@@ -2,6 +2,12 @@
 
 All notable changes are documented here. Versions follow semantic versioning.
 
+## Unreleased
+
+### Fixed
+
+- Chat and main-window actions no longer stop working after the panel cold-starts Steam. The Steam client inherited the action lock descriptor and held it for its whole lifetime, so every later action was silently rejected as a duplicate while the panel closed.
+
 ## 1.0.2 — 2026-08-17
 
 ### Changed

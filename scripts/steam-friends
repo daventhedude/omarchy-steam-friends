@@ -292,7 +292,10 @@ steam_action() {
     write_action_guard "$((now + 45))" || return 70
   fi
 
-  if ! xdg-open "$uri" >/dev/null 2>&1; then
+  # Close the lock descriptor for xdg-open: a cold launch leaves Steam running
+  # as its descendant, and an inherited descriptor would hold the lock until
+  # Steam exits, rejecting every later action.
+  if ! xdg-open "$uri" >/dev/null 2>&1 {lock_fd}>&-; then
     write_action_guard "$now" >/dev/null 2>&1 || true
     return 70
   fi
